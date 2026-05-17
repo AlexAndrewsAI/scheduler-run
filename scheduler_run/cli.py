@@ -10,11 +10,14 @@ import typer
 from scheduler_run.config import Config
 from scheduler_run.scheduler import Scheduler
 
-app = typer.Typer(help="Scheduler CLI - Run scheduled commands from a CSV file")
+app = typer.Typer(
+    help="Scheduler CLI - Run scheduled commands from a CSV file",
+    invoke_without_command=True,
+)
 
 
-@app.command()
-def run(
+@app.callback()
+def main(
     csv_path: Path = typer.Option(
         Path("schedule.csv"),
         "--csv-path",
