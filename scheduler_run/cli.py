@@ -17,8 +17,9 @@ app = typer.Typer(help="Scheduler CLI - Run scheduled commands from a CSV file")
 def run(
     csv_path: Path = typer.Option(
         Path("schedule.csv"),
-        "--csv-path", "-c",
-        help="Path to the CSV file containing scheduled commands (default: schedule.csv)"
+        "--csv-path",
+        "-c",
+        help="Path to the CSV file containing scheduled commands (default: schedule.csv)",
     ),
 ) -> None:
     """Run the scheduler with commands from a CSV file.
@@ -34,6 +35,7 @@ def run(
     config = Config(csv_path=csv_path)
     scheduler = Scheduler(config)
     scheduler.run()
+
 
 if __name__ == "__main__":
     app()

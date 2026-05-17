@@ -27,7 +27,7 @@ dependencies = [
     "uv",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=7.0",
     "ruff",
@@ -41,6 +41,10 @@ scheduler-run = "scheduler_run.cli:app"
 Homepage = "https://github.com/AlexAndrewsAI/python-package-template"
 Repository = "https://github.com/AlexAndrewsAI/python-package-template.git"
 Documentation = "https://github.com/AlexAndrewsAI/python-package-template#readme"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.uv]
 

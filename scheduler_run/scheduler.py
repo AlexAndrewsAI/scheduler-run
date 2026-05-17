@@ -68,7 +68,7 @@ class Scheduler:
         logging.info(f"Loading schedule from {csv_path}")
 
         try:
-            with open(csv_path, "r", newline="") as csvfile:
+            with open(csv_path, newline="") as csvfile:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
                     command_type = row.get("type", "").strip()
