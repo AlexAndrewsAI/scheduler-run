@@ -1,19 +1,20 @@
-# Agent Instructions: python-package-template
+# Agent Instructions: scheduler-run
 
 > **Meta-Directive:** As an agent, you are responsible for keeping this file accurate. If you add dependencies, change the project structure, or update the tech stack, you MUST update this file to reflect those changes.
 
-This project is a modern Python package template emphasizing best practices: `uv` for management, `pydantic` for validation, and `typer` for CLI.
+This project is a scheduler that runs commands from a CSV file, built with modern Python practices: `uv` for management, `pydantic` for validation, `typer` for CLI, and `schedule` for task scheduling.
 
 ## Tech Stack
 - **Environment/Deps:** [uv](https://github.com/astral-sh/uv)
 - **Validation:** [pydantic](https://docs.pydantic.dev/)
 - **CLI:** [typer](https://typer.tiangolo.com/)
+- **Scheduling:** [schedule](https://schedule.readthedocs.io/)
 - **Testing:** [pytest](https://docs.pytest.org/)
 - **Linting/Formatting:** [ruff](https://beta.ruff.rs/)
 - **Type Checking:** [mypy](https://mypy.readthedocs.io/)
 
 ## Core Directives
-- **Self-Maintenance:** If you modify `pyproject.toml`, the project architecture, or core logic (e.g., renaming `hello.py`), immediately update the "Tech Stack", "Workflow Commands", and "Project Structure" sections of this file.
+- **Self-Maintenance:** If you modify `pyproject.toml`, the project architecture, or core logic (e.g., renaming `scheduler.py`), immediately update the "Tech Stack", "Workflow Commands", and "Project Structure" sections of this file.
 - **Virtual Env:** ALWAYS use the `.venv` directory. Run `uv venv` if it's missing.
 - **Python Invocation:** Prefer `python3` or `uv run python`.
 - **Pathing:** NEVER use absolute paths. Always use relative paths from the repository root.
@@ -34,12 +35,12 @@ This project is a modern Python package template emphasizing best practices: `uv
 - **Lint:** `uv run ruff check .`
 - **Format:** `uv run ruff format .`
 - **Type Check:** `uv run mypy .`
-- **CLI Dev:** `uv run python -m python_package_template.cli hello` (Update this if the package name or CLI entry point changes)
+- **CLI Dev:** `uv run scheduler-run` (Update this if the package name or CLI entry point changes)
 
 ## Project Structure
-- `python_package_template/`: Core logic (Rename this directory and update this entry when customizing the template).
+- `scheduler_run/`: Core logic.
     - `config.py`: Pydantic models for configuration.
-    - `hello.py`: Core business logic (Update or rename this as the code evolves).
+    - `scheduler.py`: Core scheduling logic.
     - `cli.py`: Typer-based CLI entry point.
 - `tests/`: Pytest suite.
 - `pyproject.toml`: Dependency and tool configuration.
