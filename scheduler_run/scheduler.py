@@ -1,6 +1,7 @@
 """Scheduler module.
 
-Provides a scheduler that reads commands from a CSV file and runs them at specified times.
+Provides a scheduler that reads commands from a CSV file and runs them at
+specified times.
 """
 
 import csv

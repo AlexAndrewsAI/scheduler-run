@@ -22,7 +22,8 @@ def main(
         Path("schedule.csv"),
         "--csv-path",
         "-c",
-        help="Path to the CSV file containing scheduled commands (default: schedule.csv)",
+        help="Path to the CSV file containing scheduled commands "
+        "(default: schedule.csv)",
     ),
 ) -> None:
     """Run the scheduler with commands from a CSV file.
