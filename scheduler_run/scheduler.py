@@ -87,6 +87,12 @@ class Scheduler:
             logging.error(f"Error reading CSV file: {e}")
             raise
 
+        # Log all scheduled commands
+        logging.info("Scheduled commands:")
+        for job in schedule.jobs:
+            command = job.job_func.args[0] if job.job_func.args else "unknown"
+            logging.info(f"  - {command} at {job.at_time}")
+
     def run(self) -> None:
         """Run the scheduler.
 

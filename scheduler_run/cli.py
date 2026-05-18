@@ -3,12 +3,20 @@
 Provides a typer-based CLI for the package.
 """
 
+import logging
 from pathlib import Path
 
 import typer
 
 from scheduler_run.config import Config
 from scheduler_run.scheduler import Scheduler
+
+# Configure logging to display messages
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 app = typer.Typer(
     help="Scheduler CLI - Run scheduled commands from a CSV file",
