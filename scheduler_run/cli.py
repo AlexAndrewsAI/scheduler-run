@@ -11,13 +11,6 @@ import typer
 from scheduler_run.config import Config
 from scheduler_run.scheduler import Scheduler
 
-# Configure logging to display messages
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
 app = typer.Typer(
     help="Scheduler CLI - Run scheduled commands from a CSV file",
     invoke_without_command=True,
@@ -27,11 +20,11 @@ app = typer.Typer(
 @app.callback()
 def main(
     csv_path: Path = typer.Option(
-        Path("schedule.csv"),
+        Path("tests") / "schedule.csv",
         "--csv-path",
         "-c",
         help="Path to the CSV file containing scheduled commands "
-        "(default: schedule.csv)",
+        "(default: tests/schedule.csv)",
     ),
 ) -> None:
     """Run the scheduler with commands from a CSV file.
@@ -44,6 +37,13 @@ def main(
     Args:
         csv_path: Path to the CSV file containing scheduled commands.
     """
+    # Configure logging to display messages
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
     config = Config(csv_path=csv_path)
     scheduler = Scheduler(config)
     scheduler.run()

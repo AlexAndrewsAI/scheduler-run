@@ -318,7 +318,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "schedule" },
     { name = "typer" },
-    { name = "uv" },
 ]
 
 [package.dev-dependencies]
@@ -326,6 +325,7 @@ dev = [
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "uv" },
 ]
 
 [package.metadata]
@@ -333,7 +333,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "schedule", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.12.0" },
-    { name = "uv" },
 ]
 
 [package.metadata.requires-dev]
@@ -341,6 +340,7 @@ dev = [
     { name = "mypy" },
     { name = "pytest", specifier = ">=7.0" },
     { name = "ruff" },
+    { name = "uv" },
 ]
 
 [[package]]

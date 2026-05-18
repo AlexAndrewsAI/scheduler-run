@@ -6,12 +6,13 @@ specified times.
 
 import csv
 import logging
+import shlex
 import subprocess
 import time
 
 import schedule
 
-from scheduler_run.config import Config
+from scheduler_run.config import Config, ScheduleEntry
 
 
 class Scheduler:
@@ -41,7 +42,8 @@ class Scheduler:
         """
         logging.info(f"Running system command: {command}")
         try:
-            subprocess.run(command, shell=True, check=True)
+            args = shlex.split(command)
+            subprocess.run(args, check=True)
         except subprocess.CalledProcessError as e:
             logging.error(f"Command failed: {command}. Error: {e}")
 
@@ -72,25 +74,35 @@ class Scheduler:
             with open(csv_path, newline="") as csvfile:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
-                    command_type = row.get("type", "").strip()
-                    command = row.get("command", "").strip()
-                    time_str = row.get("time", "").strip()
-
-                    if command_type and command and time_str:
-                        self._schedule_command(command_type, command, time_str)
-                    else:
-                        logging.warning(f"Skipping invalid row: {row}")
+                    try:
+                        entry = ScheduleEntry(
+                            type=row.get("type", "").strip(),
+                            command=row.get("command", "").strip(),
+                            time=row.get("time", "").strip(),
+                        )
+                        self._schedule_command(entry.type, entry.command, entry.time)
+                    except ValueError as e:
+                        logging.warning(f"Skipping invalid row: {row}. Error: {e}")
         except FileNotFoundError:
             logging.error(f"CSV file not found: {csv_path}")
             raise
-        except Exception as e:
-            logging.error(f"Error reading CSV file: {e}")
+        except PermissionError:
+            logging.error(f"Permission denied reading CSV file: {csv_path}")
+            raise
+        except csv.Error as e:
+            logging.error(f"CSV parsing error: {e}")
+            raise
+        except (KeyError, ValueError) as e:
+            logging.error(f"Invalid CSV data: {e}")
             raise
 
         # Log all scheduled commands
         logging.info("Scheduled commands:")
         for job in schedule.jobs:
-            command = job.job_func.args[0] if job.job_func.args else "unknown"
+            if job.job_func is not None and job.job_func.args:
+                command = job.job_func.args[0]
+            else:
+                command = "unknown"
             logging.info(f"  - {command} at {job.at_time}")
 
     def run(self) -> None:
