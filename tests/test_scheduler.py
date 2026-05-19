@@ -66,13 +66,12 @@ def test_schedule_command_system_type(caplog: pytest.LogCaptureFixture) -> None:
         assert "Scheduled system command 'echo 'test'' at 14:30" in caplog.text
 
 
-def test_schedule_command_unsupported_type(caplog: pytest.LogCaptureFixture) -> None:
+def test_schedule_command_unsupported_type() -> None:
     """Test _schedule_command with unsupported command type."""
     scheduler = Scheduler()
-    caplog.set_level(logging.WARNING)
 
-    scheduler._schedule_command("unsupported", "echo 'test'", "14:30")
-    assert "Unsupported command type: unsupported" in caplog.text
+    with pytest.raises(ValueError, match="Unsupported command type: unsupported"):
+        scheduler._schedule_command("unsupported", "echo 'test'", "14:30")
 
 
 def test_load_schedule_success(

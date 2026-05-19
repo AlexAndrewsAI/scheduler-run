@@ -59,7 +59,7 @@ class Scheduler:
             schedule.every().day.at(time_str).do(self._run_system_command, command)
             logging.info(f"Scheduled system command '{command}' at {time_str}")
         else:
-            logging.warning(f"Unsupported command type: {command_type}")
+            raise ValueError(f"Unsupported command type: {command_type}")
 
     def load_schedule(self) -> None:
         """Load commands from CSV and schedule them.
