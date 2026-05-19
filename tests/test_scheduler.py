@@ -134,3 +134,33 @@ def test_load_schedule_invalid_row(
         scheduler.load_schedule()
 
         assert "Skipping invalid row" in caplog.text
+
+
+def test_load_schedule_duplicate_entries(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with duplicate entries."""
+    csv_file = tmp_path / "duplicate_schedule.csv"
+    csv_file.write_text(
+        "type,command,time\n"
+        "system,\"echo 'hello'\",14:10\n"
+        "system,\"echo 'hello'\",14:10\n"
+        "system,\"echo 'goodbye'\",15:00\n"
+    )
+
+    config = Config(csv_path=csv_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.WARNING)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        scheduler.load_schedule()
+
+        assert "Duplicate entry detected" in caplog.text
+        assert "type='system', command='echo 'hello'', time='14:10'" in caplog.text
+        # Verify only unique entries were scheduled (2 unique entries)
+        assert mock_every.call_count == 2

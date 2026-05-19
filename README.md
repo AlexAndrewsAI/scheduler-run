@@ -141,7 +141,9 @@ scheduler-run/
 │   └── scheduler.py
 └── tests/
     ├── __init__.py
-    ├── test_hello.py
+    ├── test_cli.py
+    ├── test_config.py
+    ├── test_scheduler.py
     └── schedule.csv
 
 ```

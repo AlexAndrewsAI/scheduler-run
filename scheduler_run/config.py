@@ -30,17 +30,19 @@ class ScheduleEntry(BaseModel):
     Attributes:
         type: The type of command (e.g., "system").
         command: The command to execute.
-        time: The time to run the command in 24h format (HH:MM).
+        time: The time to run the command in 24h format (H:MM or HH:MM), where single-digit hours (H:MM) are allowed in addition to two-digit hours (HH:MM).
     """
 
     type: str = Field(description="The type of command (e.g., 'system')")
     command: str = Field(description="The command to execute")
-    time: str = Field(description="The time to run the command in 24h format (HH:MM)")
+    time: str = Field(
+        description="The time to run the command in 24h format (H:MM or HH:MM), where single-digit hours (H:MM) are allowed in addition to two-digit hours (HH:MM)"
+    )
 
     @field_validator("time")
     @classmethod
     def validate_time_format(cls, v: str) -> str:
-        """Validate that time is in HH:MM format.
+        """Validate that time is in H:MM or HH:MM format.
 
         Args:
             v: The time string to validate.
@@ -53,7 +55,7 @@ class ScheduleEntry(BaseModel):
         """
         if not re.match(r"^([01]?[0-9]|2[0-3]):[0-5][0-9]$", v):
             raise ValueError(
-                f"Invalid time format: '{v}'. Expected format: HH:MM (24-hour)"
+                f"Invalid time format: '{v}'. Expected format: H:MM or HH:MM (24-hour)"
             )
         return v
 

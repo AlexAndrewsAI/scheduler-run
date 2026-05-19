@@ -72,6 +72,8 @@ class Scheduler:
         csv_path = self.config.csv_path
         logging.info(f"Loading schedule from {csv_path}")
 
+        seen_entries: set[tuple[str, str, str]] = set()
+
         try:
             with open(csv_path, newline="") as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -82,7 +84,17 @@ class Scheduler:
                             command=row.get("command", "").strip(),
                             time=row.get("time", "").strip(),
                         )
-                        self._schedule_command(entry.type, entry.command, entry.time)
+                        entry_key = (entry.type, entry.command, entry.time)
+                        if entry_key in seen_entries:
+                            logging.warning(
+                                f"Duplicate entry detected: type='{entry.type}', "
+                                f"command='{entry.command}', time='{entry.time}'"
+                            )
+                        else:
+                            seen_entries.add(entry_key)
+                            self._schedule_command(
+                                entry.type, entry.command, entry.time
+                            )
                     except ValueError as e:
                         logging.warning(f"Skipping invalid row: {row}. Error: {e}")
         except FileNotFoundError:

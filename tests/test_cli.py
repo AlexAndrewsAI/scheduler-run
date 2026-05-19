@@ -20,10 +20,6 @@ def test_run_command_default_path() -> None:
 
         result = runner.invoke(app, [])
 
-        if result.exit_code != 0:
-            print(f"Exit code: {result.exit_code}")
-            print(f"Output: {result.output}")
-            print(f"Exception: {result.exception}")
         assert result.exit_code == 0
         mock_scheduler_class.assert_called_once()
         mock_scheduler.run.assert_called_once()
