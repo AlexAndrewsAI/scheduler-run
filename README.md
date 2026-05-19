@@ -141,7 +141,9 @@ scheduler-run/
 │   └── scheduler.py
 └── tests/
     ├── __init__.py
-    ├── test_hello.py
+    ├── test_cli.py
+    ├── test_config.py
+    ├── test_scheduler.py
     └── schedule.csv
 
 ```
@@ -166,6 +168,12 @@ scheduler-run/
 - ✅ **Linting**: Code quality checks with ruff
 - ✅ **Dependency management**: Explicit dependencies in pyproject.toml
 - ✅ **Python versions**: Supports Python 3.8+
+
+
+## Disclaimer
+
+This software is intended for personal use and is provided "as is", without any warranty of any kind, express or implied. There is no guarantee that this software is free of bugs or security vulnerabilities. Use it at your own risk.
+
 
 ## License
 

@@ -1,16 +1,18 @@
 """Scheduler module.
 
-Provides a scheduler that reads commands from a CSV file and runs them at specified times.
+Provides a scheduler that reads commands from a CSV file and runs them at
+specified times.
 """
 
 import csv
 import logging
+import shlex
 import subprocess
 import time
 
 import schedule
 
-from scheduler_run.config import Config
+from scheduler_run.config import Config, ScheduleEntry
 
 
 class Scheduler:
@@ -31,6 +33,7 @@ class Scheduler:
         if config is None:
             config = Config()
         self.config = config
+        self.scheduled_commands: list[tuple[str, str]] = []
 
     def _run_system_command(self, command: str) -> None:
         """Run a system command.
@@ -40,7 +43,8 @@ class Scheduler:
         """
         logging.info(f"Running system command: {command}")
         try:
-            subprocess.run(command, shell=True, check=True)
+            args = shlex.split(command)
+            subprocess.run(args, check=True)
         except subprocess.CalledProcessError as e:
             logging.error(f"Command failed: {command}. Error: {e}")
 
@@ -54,9 +58,10 @@ class Scheduler:
         """
         if command_type == "system":
             schedule.every().day.at(time_str).do(self._run_system_command, command)
+            self.scheduled_commands.append((command, time_str))
             logging.info(f"Scheduled system command '{command}' at {time_str}")
         else:
-            logging.warning(f"Unsupported command type: {command_type}")
+            raise ValueError(f"Unsupported command type: {command_type}")
 
     def load_schedule(self) -> None:
         """Load commands from CSV and schedule them.
@@ -67,24 +72,48 @@ class Scheduler:
         csv_path = self.config.csv_path
         logging.info(f"Loading schedule from {csv_path}")
 
+        seen_entries: set[tuple[str, str, str]] = set()
+
         try:
-            with open(csv_path, "r", newline="") as csvfile:
+            with open(csv_path, newline="") as csvfile:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
-                    command_type = row.get("type", "").strip()
-                    command = row.get("command", "").strip()
-                    time_str = row.get("time", "").strip()
-
-                    if command_type and command and time_str:
-                        self._schedule_command(command_type, command, time_str)
-                    else:
-                        logging.warning(f"Skipping invalid row: {row}")
+                    try:
+                        entry = ScheduleEntry(
+                            type=row.get("type", "").strip(),
+                            command=row.get("command", "").strip(),
+                            time=row.get("time", "").strip(),
+                        )
+                        entry_key = (entry.type, entry.command, entry.time)
+                        if entry_key in seen_entries:
+                            logging.warning(
+                                f"Duplicate entry detected: type='{entry.type}', "
+                                f"command='{entry.command}', time='{entry.time}'"
+                            )
+                        else:
+                            seen_entries.add(entry_key)
+                            self._schedule_command(
+                                entry.type, entry.command, entry.time
+                            )
+                    except ValueError as e:
+                        logging.warning(f"Skipping invalid row: {row}. Error: {e}")
         except FileNotFoundError:
             logging.error(f"CSV file not found: {csv_path}")
             raise
-        except Exception as e:
-            logging.error(f"Error reading CSV file: {e}")
+        except PermissionError:
+            logging.error(f"Permission denied reading CSV file: {csv_path}")
             raise
+        except csv.Error as e:
+            logging.error(f"CSV parsing error: {e}")
+            raise
+        except (KeyError, ValueError) as e:
+            logging.error(f"Invalid CSV data: {e}")
+            raise
+
+        # Log all scheduled commands
+        logging.info("Scheduled commands:")
+        for command, time_str in self.scheduled_commands:
+            logging.info(f"  - {command} at {time_str}")
 
     def run(self) -> None:
         """Run the scheduler.

@@ -1,7 +1,7 @@
-"""Python package template.
+"""scheduler-run.
 
-A simple template for creating Python packages with configuration management
-and a scheduler example.
+A scheduler that runs commands from a CSV file at specified times using
+pydantic for configuration and the schedule library for task scheduling.
 """
 
 from scheduler_run.config import Config
