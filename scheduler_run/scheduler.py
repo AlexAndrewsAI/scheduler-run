@@ -33,6 +33,7 @@ class Scheduler:
         if config is None:
             config = Config()
         self.config = config
+        self.scheduled_commands: list[tuple[str, str]] = []
 
     def _run_system_command(self, command: str) -> None:
         """Run a system command.
@@ -57,6 +58,7 @@ class Scheduler:
         """
         if command_type == "system":
             schedule.every().day.at(time_str).do(self._run_system_command, command)
+            self.scheduled_commands.append((command, time_str))
             logging.info(f"Scheduled system command '{command}' at {time_str}")
         else:
             raise ValueError(f"Unsupported command type: {command_type}")
@@ -98,12 +100,8 @@ class Scheduler:
 
         # Log all scheduled commands
         logging.info("Scheduled commands:")
-        for job in schedule.jobs:
-            if job.job_func is not None and job.job_func.args:
-                command = job.job_func.args[0]
-            else:
-                command = "unknown"
-            logging.info(f"  - {command} at {job.at_time}")
+        for command, time_str in self.scheduled_commands:
+            logging.info(f"  - {command} at {time_str}")
 
     def run(self) -> None:
         """Run the scheduler.
