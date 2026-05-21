@@ -65,8 +65,8 @@ Run the scheduler using the CLI:
 # Run with default schedule.yaml
 uv run scheduler-run
 
-# Run with a custom YAML filefault=Pfault=Pfault=P
-uv run scheduler-run --yaml-path path/to/your/schedule.yaml
+# Run with a custom YAML file
+uv run scheduler-run --input path/to/your/schedule.yaml
 
 # Show help
 uv run scheduler-run --help
@@ -77,7 +77,7 @@ uv run scheduler-run --help
 To test the scheduler with the example schedule.yaml file:
 
 ```bash
-uv run scheduler-run --yaml-path tests/schedule.yaml
+uv run scheduler-run --input tests/schedule.yaml
 ```
 
 The scheduler will load the commands from the YAML file and run them at the specified times. Press Ctrl+C to stop the scheduler.

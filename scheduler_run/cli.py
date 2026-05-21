@@ -19,10 +19,10 @@ app = typer.Typer(
 
 @app.callback()
 def main(
-    yaml_path: Path = typer.Option(
+    input: Path = typer.Option(
         Path("schedule.yaml"),
-        "--yaml-path",
-        "-y",
+        "--input",
+        "-i",
         help="Path to the YAML file containing scheduled commands "
         "(default: schedule.yaml)",
     ),
@@ -38,7 +38,7 @@ def main(
             time: '14:10'
 
     Args:
-        yaml_path: Path to the YAML file containing scheduled commands.
+        input: Path to the YAML file containing scheduled commands.
     """
     # Configure logging to display messages only if not already configured
     if not logging.getLogger().handlers:
@@ -48,7 +48,7 @@ def main(
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-    config = Config(yaml_path=yaml_path)
+    config = Config(yaml_path=input)
     scheduler = Scheduler(config)
     scheduler.run()
 

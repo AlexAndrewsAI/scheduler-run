@@ -36,7 +36,7 @@ def test_run_command_custom_path() -> None:
         mock_scheduler = MagicMock()
         mock_scheduler_class.return_value = mock_scheduler
 
-        result = runner.invoke(app, ["--yaml-path", custom_path])
+        result = runner.invoke(app, ["--input", custom_path])
 
         assert result.exit_code == 0
         mock_scheduler_class.assert_called_once()
@@ -44,7 +44,7 @@ def test_run_command_custom_path() -> None:
 
 
 def test_run_command_short_option() -> None:
-    """Test CLI run command with short option -y."""
+    """Test CLI run command with short option -i."""
     custom_path = "custom/schedule.yaml"
 
     with (
@@ -54,7 +54,7 @@ def test_run_command_short_option() -> None:
         mock_scheduler = MagicMock()
         mock_scheduler_class.return_value = mock_scheduler
 
-        result = runner.invoke(app, ["-y", custom_path])
+        result = runner.invoke(app, ["-i", custom_path])
 
         assert result.exit_code == 0
         mock_scheduler_class.assert_called_once()
@@ -71,4 +71,4 @@ def test_run_command_help() -> None:
     """Test run command help."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "yaml-path" in result.output
+    assert "input" in result.output
