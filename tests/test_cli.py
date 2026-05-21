@@ -10,7 +10,7 @@ runner = CliRunner()
 
 
 def test_run_command_default_path() -> None:
-    """Test CLI run command with default CSV path."""
+    """Test CLI run command with default YAML path."""
     with (
         patch("scheduler_run.cli.Scheduler") as mock_scheduler_class,
         patch("scheduler_run.cli.Config"),
@@ -26,8 +26,8 @@ def test_run_command_default_path() -> None:
 
 
 def test_run_command_custom_path() -> None:
-    """Test CLI run command with custom CSV path."""
-    custom_path = "custom/schedule.csv"
+    """Test CLI run command with custom YAML path."""
+    custom_path = "custom/schedule.yaml"
 
     with (
         patch("scheduler_run.cli.Scheduler") as mock_scheduler_class,
@@ -36,7 +36,7 @@ def test_run_command_custom_path() -> None:
         mock_scheduler = MagicMock()
         mock_scheduler_class.return_value = mock_scheduler
 
-        result = runner.invoke(app, ["--csv-path", custom_path])
+        result = runner.invoke(app, ["--yaml-path", custom_path])
 
         assert result.exit_code == 0
         mock_scheduler_class.assert_called_once()
@@ -44,8 +44,8 @@ def test_run_command_custom_path() -> None:
 
 
 def test_run_command_short_option() -> None:
-    """Test CLI run command with short option -c."""
-    custom_path = "custom/schedule.csv"
+    """Test CLI run command with short option -y."""
+    custom_path = "custom/schedule.yaml"
 
     with (
         patch("scheduler_run.cli.Scheduler") as mock_scheduler_class,
@@ -54,7 +54,7 @@ def test_run_command_short_option() -> None:
         mock_scheduler = MagicMock()
         mock_scheduler_class.return_value = mock_scheduler
 
-        result = runner.invoke(app, ["-c", custom_path])
+        result = runner.invoke(app, ["-y", custom_path])
 
         assert result.exit_code == 0
         mock_scheduler_class.assert_called_once()
@@ -71,4 +71,4 @@ def test_run_command_help() -> None:
     """Test run command help."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "csv-path" in result.output
+    assert "yaml-path" in result.output

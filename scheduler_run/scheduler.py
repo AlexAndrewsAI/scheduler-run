@@ -1,25 +1,26 @@
 """Scheduler module.
 
-Provides a scheduler that reads commands from a CSV file and runs them at
+Provides a scheduler that reads commands from a YAML file and runs them at
 specified times.
 """
 
-import csv
 import logging
 import shlex
 import subprocess
 import time
 
 import schedule
+import yaml
 
 from scheduler_run.config import Config, ScheduleEntry
 
 
 class Scheduler:
-    """A scheduler that runs commands from a CSV file.
+    """A scheduler that runs commands from a YAML file.
 
-    Reads a CSV file with columns: type, command, time
-    and schedules each command to run daily at the specified time.
+    Reads a YAML file with a list of schedule entries, each containing:
+    type, command, and time fields.
+    Schedules each command to run daily at the specified time.
     Currently only type "system" is supported.
     """
 
@@ -64,25 +65,29 @@ class Scheduler:
             raise ValueError(f"Unsupported command type: {command_type}")
 
     def load_schedule(self) -> None:
-        """Load commands from CSV and schedule them.
+        """Load commands from YAML and schedule them.
 
-        Reads the CSV file specified in config.csv_path and schedules
+        Reads the YAML file specified in config.yaml_path and schedules
         each command to run daily at the specified time.
         """
-        csv_path = self.config.csv_path
-        logging.info(f"Loading schedule from {csv_path}")
+        yaml_path = self.config.yaml_path
+        logging.info(f"Loading schedule from {yaml_path}")
 
         seen_entries: set[tuple[str, str, str]] = set()
 
         try:
-            with open(csv_path, newline="") as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
+            with open(yaml_path) as yamlfile:
+                data = yaml.safe_load(yamlfile)
+                if not data or "schedules" not in data:
+                    logging.error("Invalid YAML format: missing 'schedules' key")
+                    raise ValueError("Invalid YAML format: missing 'schedules' key")
+
+                for entry_data in data["schedules"]:
                     try:
                         entry = ScheduleEntry(
-                            type=row.get("type", "").strip(),
-                            command=row.get("command", "").strip(),
-                            time=row.get("time", "").strip(),
+                            type=entry_data.get("type", "").strip(),
+                            command=entry_data.get("command", "").strip(),
+                            time=entry_data.get("time", "").strip(),
                         )
                         entry_key = (entry.type, entry.command, entry.time)
                         if entry_key in seen_entries:
@@ -96,18 +101,20 @@ class Scheduler:
                                 entry.type, entry.command, entry.time
                             )
                     except ValueError as e:
-                        logging.warning(f"Skipping invalid row: {row}. Error: {e}")
+                        logging.warning(
+                            f"Skipping invalid entry: {entry_data}. Error: {e}"
+                        )
         except FileNotFoundError:
-            logging.error(f"CSV file not found: {csv_path}")
+            logging.error(f"YAML file not found: {yaml_path}")
             raise
         except PermissionError:
-            logging.error(f"Permission denied reading CSV file: {csv_path}")
+            logging.error(f"Permission denied reading YAML file: {yaml_path}")
             raise
-        except csv.Error as e:
-            logging.error(f"CSV parsing error: {e}")
+        except yaml.YAMLError as e:
+            logging.error(f"YAML parsing error: {e}")
             raise
         except (KeyError, ValueError) as e:
-            logging.error(f"Invalid CSV data: {e}")
+            logging.error(f"Invalid YAML data: {e}")
             raise
 
         # Log all scheduled commands

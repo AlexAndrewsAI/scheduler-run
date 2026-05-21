@@ -14,15 +14,15 @@ from scheduler_run.scheduler import Scheduler
 def test_scheduler_init_default_config() -> None:
     """Test Scheduler initialization with default config."""
     scheduler = Scheduler()
-    assert scheduler.config.csv_path == Path("tests/schedule.csv")
+    assert scheduler.config.yaml_path == Path("tests/schedule.yaml")
 
 
 def test_scheduler_init_custom_config() -> None:
     """Test Scheduler initialization with custom config."""
-    custom_path = Path("custom/schedule.csv")
-    config = Config(csv_path=custom_path)
+    custom_path = Path("custom/schedule.yaml")
+    config = Config(yaml_path=custom_path)
     scheduler = Scheduler(config)
-    assert scheduler.config.csv_path == custom_path
+    assert scheduler.config.yaml_path == custom_path
 
 
 def test_run_system_command_success(caplog: pytest.LogCaptureFixture) -> None:
@@ -77,11 +77,13 @@ def test_schedule_command_unsupported_type() -> None:
 def test_load_schedule_success(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with a valid CSV file."""
-    csv_file = tmp_path / "test_schedule.csv"
-    csv_file.write_text("type,command,time\nsystem,\"echo 'hello'\",14:10\n")
+    """Test load_schedule with a valid YAML file."""
+    yaml_file = tmp_path / "test_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
+    )
 
-    config = Config(csv_path=csv_file)
+    config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
     caplog.set_level(logging.INFO)
 
@@ -93,35 +95,41 @@ def test_load_schedule_success(
 
         scheduler.load_schedule()
 
-        assert f"Loading schedule from {csv_file}" in caplog.text
+        assert f"Loading schedule from {yaml_file}" in caplog.text
         mock_every.assert_called()
 
 
 def test_load_schedule_file_not_found(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with a non-existent CSV file."""
-    non_existent = tmp_path / "non_existent.csv"
-    config = Config(csv_path=non_existent)
+    """Test load_schedule with a non-existent YAML file."""
+    non_existent = tmp_path / "non_existent.yaml"
+    config = Config(yaml_path=non_existent)
     scheduler = Scheduler(config)
     caplog.set_level(logging.ERROR)
 
     with pytest.raises(FileNotFoundError):
         scheduler.load_schedule()
 
-    assert f"CSV file not found: {non_existent}" in caplog.text
+    assert f"YAML file not found: {non_existent}" in caplog.text
 
 
-def test_load_schedule_invalid_row(
+def test_load_schedule_invalid_entry(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with invalid CSV rows."""
-    csv_file = tmp_path / "invalid_schedule.csv"
-    csv_file.write_text(
-        "type,command,time\nsystem,\"echo 'hello'\",\n,echo test,14:10\n"
+    """Test load_schedule with invalid YAML entries."""
+    yaml_file = tmp_path / "invalid_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo 'hello'\n"
+        "    time: ''\n"
+        "  - type: ''\n"
+        "    command: echo test\n"
+        "    time: '14:10'\n"
     )
 
-    config = Config(csv_path=csv_file)
+    config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
     caplog.set_level(logging.WARNING)
 
@@ -133,22 +141,28 @@ def test_load_schedule_invalid_row(
 
         scheduler.load_schedule()
 
-        assert "Skipping invalid row" in caplog.text
+        assert "Skipping invalid entry" in caplog.text
 
 
 def test_load_schedule_duplicate_entries(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Test load_schedule with duplicate entries."""
-    csv_file = tmp_path / "duplicate_schedule.csv"
-    csv_file.write_text(
-        "type,command,time\n"
-        "system,\"echo 'hello'\",14:10\n"
-        "system,\"echo 'hello'\",14:10\n"
-        "system,\"echo 'goodbye'\",15:00\n"
+    yaml_file = tmp_path / "duplicate_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo 'hello'\n"
+        "    time: '14:10'\n"
+        "  - type: system\n"
+        "    command: echo 'hello'\n"
+        "    time: '14:10'\n"
+        "  - type: system\n"
+        "    command: echo 'goodbye'\n"
+        "    time: '15:00'\n"
     )
 
-    config = Config(csv_path=csv_file)
+    config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
     caplog.set_level(logging.WARNING)
 

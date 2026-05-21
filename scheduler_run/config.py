@@ -13,19 +13,19 @@ class Config(BaseModel):
     """Configuration for the scheduler.
 
     Attributes:
-        csv_path: Path to the CSV file containing scheduled commands.
+        yaml_path: Path to the YAML file containing scheduled commands.
     """
 
-    csv_path: Path = Field(
-        default=Path("tests/schedule.csv"),
-        description="Path to the CSV file containing scheduled commands",
+    yaml_path: Path = Field(
+        default=Path("tests/schedule.yaml"),
+        description="Path to the YAML file containing scheduled commands",
     )
 
     model_config = {"title": "Scheduler Config"}
 
 
 class ScheduleEntry(BaseModel):
-    """A single schedule entry from the CSV file.
+    """A single schedule entry from the YAML file.
 
     Attributes:
         type: The type of command (e.g., "system").

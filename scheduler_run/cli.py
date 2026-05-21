@@ -12,30 +12,33 @@ from scheduler_run.config import Config
 from scheduler_run.scheduler import Scheduler
 
 app = typer.Typer(
-    help="Scheduler CLI - Run scheduled commands from a CSV file",
+    help="Scheduler CLI - Run scheduled commands from a YAML file",
     invoke_without_command=True,
 )
 
 
 @app.callback()
 def main(
-    csv_path: Path = typer.Option(
-        Path("tests") / "schedule.csv",
-        "--csv-path",
-        "-c",
-        help="Path to the CSV file containing scheduled commands "
-        "(default: tests/schedule.csv)",
+    yaml_path: Path = typer.Option(
+        Path("tests") / "schedule.yaml",
+        "--yaml-path",
+        "-y",
+        help="Path to the YAML file containing scheduled commands "
+        "(default: tests/schedule.yaml)",
     ),
 ) -> None:
-    """Run the scheduler with commands from a CSV file.
+    """Run the scheduler with commands from a YAML file.
 
-    The CSV file should have columns: type, command, time
+    The YAML file should have a 'schedules' key with a list of entries,
+    each containing: type, command, time
     Example:
-        type,command,time
-        system,"echo 'hello world'",14:10
+        schedules:
+          - type: system
+            command: echo 'hello world'
+            time: '14:10'
 
     Args:
-        csv_path: Path to the CSV file containing scheduled commands.
+        yaml_path: Path to the YAML file containing scheduled commands.
     """
     # Configure logging to display messages
     logging.basicConfig(
@@ -44,7 +47,7 @@ def main(
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    config = Config(csv_path=csv_path)
+    config = Config(yaml_path=yaml_path)
     scheduler = Scheduler(config)
     scheduler.run()
 
