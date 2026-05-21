@@ -1,4 +1,0 @@
-type,command,time
-system,"echo 'hello world'",14:10
-system,"echo 'good morning'",08:00
-system,"echo 'good night'",22:00
