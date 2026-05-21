@@ -178,3 +178,101 @@ def test_load_schedule_duplicate_entries(
         assert "type='system', command='echo 'hello'', time='14:10'" in caplog.text
         # Verify only unique entries were scheduled (2 unique entries)
         assert mock_every.call_count == 2
+
+
+def test_scheduler_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test Scheduler.run() method."""
+    yaml_file = tmp_path / "test_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n  - type: system\n    command: echo 'test'\n    time: '14:30'\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        with patch("scheduler_run.scheduler.schedule.run_pending"):
+            with patch("scheduler_run.scheduler.time.sleep") as mock_sleep:
+                # Make sleep raise KeyboardInterrupt to exit the loop
+                mock_sleep.side_effect = KeyboardInterrupt()
+
+                scheduler.run()
+
+                assert "Loading schedule from" in caplog.text
+                assert "Scheduler started" in caplog.text
+                assert "Scheduler stopped by user" in caplog.text
+
+
+def test_load_schedule_empty_list(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with an empty schedules list."""
+    yaml_file = tmp_path / "empty_schedule.yaml"
+    yaml_file.write_text("schedules: []\n")
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    scheduler.load_schedule()
+
+    assert "Loading schedule from" in caplog.text
+    assert "Scheduled commands:" in caplog.text
+    assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_missing_type_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with entry missing 'type' key."""
+    yaml_file = tmp_path / "missing_type.yaml"
+    yaml_file.write_text("schedules:\n  - command: echo 'test'\n    time: '14:30'\n")
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.WARNING)
+
+    scheduler.load_schedule()
+
+    assert "Skipping invalid entry" in caplog.text
+    assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_missing_command_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with entry missing 'command' key."""
+    yaml_file = tmp_path / "missing_command.yaml"
+    yaml_file.write_text("schedules:\n  - type: system\n    time: '14:30'\n")
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.WARNING)
+
+    scheduler.load_schedule()
+
+    assert "Skipping invalid entry" in caplog.text
+    assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_missing_time_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with entry missing 'time' key."""
+    yaml_file = tmp_path / "missing_time.yaml"
+    yaml_file.write_text("schedules:\n  - type: system\n    command: echo 'test'\n")
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.WARNING)
+
+    scheduler.load_schedule()
+
+    assert "Skipping invalid entry" in caplog.text
+    assert len(scheduler.scheduled_commands) == 0
