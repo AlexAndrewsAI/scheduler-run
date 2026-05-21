@@ -197,16 +197,18 @@ def test_scheduler_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None
         mock_at = MagicMock()
         mock_day.at.return_value = mock_at
 
-        with patch("scheduler_run.scheduler.schedule.run_pending"):
-            with patch("scheduler_run.scheduler.time.sleep") as mock_sleep:
-                # Make sleep raise KeyboardInterrupt to exit the loop
-                mock_sleep.side_effect = KeyboardInterrupt()
+        with (
+            patch("scheduler_run.scheduler.schedule.run_pending"),
+            patch("scheduler_run.scheduler.time.sleep") as mock_sleep,
+        ):
+            # Make sleep raise KeyboardInterrupt to exit the loop
+            mock_sleep.side_effect = KeyboardInterrupt()
 
-                scheduler.run()
+            scheduler.run()
 
-                assert "Loading schedule from" in caplog.text
-                assert "Scheduler started" in caplog.text
-                assert "Scheduler stopped by user" in caplog.text
+            assert "Loading schedule from" in caplog.text
+            assert "Scheduler started" in caplog.text
+            assert "Scheduler stopped by user" in caplog.text
 
 
 def test_load_schedule_empty_list(
