@@ -33,6 +33,7 @@ dev = [
     "ruff",
     "mypy",
     "uv",
+    "types-pyyaml>=6.0.12.20260518",
 ]
 
 [project.scripts]

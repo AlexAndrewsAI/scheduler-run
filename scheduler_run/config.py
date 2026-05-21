@@ -30,13 +30,19 @@ class ScheduleEntry(BaseModel):
     Attributes:
         type: The type of command (e.g., "system").
         command: The command to execute.
-        time: The time to run the command in 24h format (H:MM or HH:MM), where single-digit hours (H:MM) are allowed in addition to two-digit hours (HH:MM).
+        time: The time to run the command in 24h format (H:MM or HH:MM),
+            where single-digit hours (H:MM) are allowed in addition to
+            two-digit hours (HH:MM).
     """
 
     type: str = Field(description="The type of command (e.g., 'system')")
     command: str = Field(description="The command to execute")
     time: str = Field(
-        description="The time to run the command in 24h format (H:MM or HH:MM), where single-digit hours (H:MM) are allowed in addition to two-digit hours (HH:MM)"
+        description=(
+            "The time to run the command in 24h format (H:MM or HH:MM), "
+            "where single-digit hours (H:MM) are allowed in addition to "
+            "two-digit hours (HH:MM)"
+        )
     )
 
     @field_validator("time")
