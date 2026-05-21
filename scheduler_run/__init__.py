@@ -1,6 +1,6 @@
 """scheduler-run.
 
-A scheduler that runs commands from a CSV file at specified times using
+A scheduler that runs commands from a YAML file at specified times using
 pydantic for configuration and the schedule library for task scheduling.
 """
 

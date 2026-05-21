@@ -17,7 +17,7 @@ class Config(BaseModel):
     """
 
     yaml_path: Path = Field(
-        default=Path("tests/schedule.yaml"),
+        default=Path("schedule.yaml"),
         description="Path to the YAML file containing scheduled commands",
     )
 

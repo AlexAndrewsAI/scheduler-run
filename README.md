@@ -1,10 +1,11 @@
 # scheduler-run
 
-A scheduler that runs commands from a CSV file at specified times using **uv**, **pydantic**, and the **schedule** library.
+
+A scheduler that runs commands from a YAML file at specified times using **uv**, **pydantic**, and the **schedule** library.
 
 ## Overview
 
-This is a command scheduler that reads commands from a CSV file and executes them daily at specified times. It demonstrates:
+This is a command scheduler that reads commands from a YAML file and executes them daily at specified times. It demonstrates:
 
 - Modern Python packaging with `pyproject.toml`
 - Type hints and static type checking with **mypy**
@@ -14,7 +15,7 @@ This is a command scheduler that reads commands from a CSV file and executes the
 - Dependency management with **uv**
 - Command scheduling with the **schedule** library
 
-The scheduler reads a CSV file with columns: `type`, `command`, and `time`, and runs each command daily at the specified time.
+The scheduler reads a YAML file with entries containing: `type`, `command`, and `time`, and runs each command daily at the specified time.
 
 ## Installation
 
@@ -35,19 +36,25 @@ uv sync
 
 ## Usage
 
-### CSV Format
+### YAML Format
 
-Create a CSV file with the following columns:
+Create a YAML file with a `schedules` key containing a list of entries:
 - `type`: The type of command (currently only "system" is supported)
-- `command`: The command to execute (enclosed in quotes if it contains spaces)
+- `command`: The command to execute
 - `time`: The time to run the command in 24-hour format (e.g., "14:10")
 
-Example `schedule.csv`:
-```csv
-type,command,time
-system,"echo 'hello world'",14:10
-system,"echo 'good morning'",08:00
-system,"echo 'good night'",22:00
+Example `schedule.yaml`:
+```yaml
+schedules:
+  - type: system
+    command: echo 'hello world'
+    time: '14:10'
+  - type: system
+    command: echo 'good morning'
+    time: '08:00'
+  - type: system
+    command: echo 'good night'
+    time: '22:00'
 ```
 
 ### Command Line Interface
@@ -55,25 +62,25 @@ system,"echo 'good night'",22:00
 Run the scheduler using the CLI:
 
 ```bash
-# Run with default schedule.csv
+# Run with default schedule.yaml
 uv run scheduler-run
 
-# Run with a custom CSV file
-uv run scheduler-run --csv-path path/to/your/schedule.csv
+# Run with a custom YAML filefault=Pfault=Pfault=P
+uv run scheduler-run --yaml-path path/to/your/schedule.yaml
 
 # Show help
 uv run scheduler-run --help
 ```
 
-### Testing with schedule.csv
+### Testing with schedule.yaml
 
-To test the scheduler with the example schedule.csv file:
+To test the scheduler with the example schedule.yaml file:
 
 ```bash
-uv run scheduler-run --csv-path tests/schedule.csv
+uv run scheduler-run --yaml-path tests/schedule.yaml
 ```
 
-The scheduler will load the commands from the CSV file and run them at the specified times. Press Ctrl+C to stop the scheduler.
+The scheduler will load the commands from the YAML file and run them at the specified times. Press Ctrl+C to stop the scheduler.
 
 ### Python API
 
@@ -87,7 +94,7 @@ from scheduler_run.config import Config
 scheduler = Scheduler()
 
 # Or with custom config
-config = Config(csv_path="path/to/schedule.csv")
+config = Config(yaml_path="path/to/schedule.yaml")
 scheduler = Scheduler(config)
 
 # Run the scheduler (blocks indefinitely)
@@ -112,7 +119,7 @@ uv run pytest
 
 # Run with verbose output
 uv run pytest -v
-
+uv run scheduler-run 
 # Show print statements during tests
 uv run pytest -s
 ```
@@ -136,7 +143,7 @@ scheduler-run/
 ├── README.md
 ├── scheduler_run/
 │   ├── __init__.py
-│   ├── cli.py
+│   ├uv run scheduler-run ── cli.py
 │   ├── config.py
 │   └── scheduler.py
 └── tests/
@@ -144,17 +151,17 @@ scheduler-run/
     ├── test_cli.py
     ├── test_config.py
     ├── test_scheduler.py
-    └── schedule.csv
+    └── schedule.yaml
 
 ```
 
 ## Features
-
-- **CSV-based scheduling**: Define commands and times in a simple CSV format
-- **Type hints**: Full type annotations for better IDE support and mypy compatibility
+uv run scheduler-run 
+- **YAML-based scheduling**: Define commands and times in a simuv run scheduler-run uv run scheduler-run ple YAML format
+- **Type hints**: Full type annotuv run scheduler-run ations for better IDE support and mypy compatibility
 - **Pydantic validation**: Runtime type validation and configuration management
-- **CLI interface**: Easy-to-use command line interface with typer
-- **Testing**: Comprehensive test suite with pytest
+- **CLI interface**: Easy-uv run scheduler-run to-use command line interface with typer
+- **Tuv run scheduler-run esting**: Comprehensive test suite with pytest
 - **Code quality**: Automated linting with ruff and type checking with mypy
 - **Flexible scheduling**: Uses the schedule library for reliable task execution
 

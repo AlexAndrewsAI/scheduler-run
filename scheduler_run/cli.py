@@ -20,11 +20,11 @@ app = typer.Typer(
 @app.callback()
 def main(
     yaml_path: Path = typer.Option(
-        Path("tests") / "schedule.yaml",
+        Path("schedule.yaml"),
         "--yaml-path",
         "-y",
         help="Path to the YAML file containing scheduled commands "
-        "(default: tests/schedule.yaml)",
+        "(default: schedule.yaml)",
     ),
 ) -> None:
     """Run the scheduler with commands from a YAML file.

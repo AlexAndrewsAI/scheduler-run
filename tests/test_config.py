@@ -10,7 +10,7 @@ from scheduler_run.config import Config, ScheduleEntry
 def test_config_default() -> None:
     """Test Config with default values."""
     config = Config()
-    assert config.yaml_path == Path("tests/schedule.yaml")
+    assert config.yaml_path == Path("schedule.yaml")
 
 
 def test_config_custom_path() -> None:

@@ -14,7 +14,7 @@ from scheduler_run.scheduler import Scheduler
 def test_scheduler_init_default_config() -> None:
     """Test Scheduler initialization with default config."""
     scheduler = Scheduler()
-    assert scheduler.config.yaml_path == Path("tests/schedule.yaml")
+    assert scheduler.config.yaml_path == Path("schedule.yaml")
 
 
 def test_scheduler_init_custom_config() -> None:
