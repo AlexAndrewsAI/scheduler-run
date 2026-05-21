@@ -40,12 +40,13 @@ def main(
     Args:
         yaml_path: Path to the YAML file containing scheduled commands.
     """
-    # Configure logging to display messages
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    # Configure logging to display messages only if not already configured
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
 
     config = Config(yaml_path=yaml_path)
     scheduler = Scheduler(config)

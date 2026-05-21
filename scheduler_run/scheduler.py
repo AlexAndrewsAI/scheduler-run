@@ -62,7 +62,9 @@ class Scheduler:
             self.scheduled_commands.append((command, time_str))
             logging.info(f"Scheduled system command '{command}' at {time_str}")
         else:
-            raise ValueError(f"Unsupported command type: {command_type}")
+            raise ValueError(
+                f"Unsupported command type: {command_type}. Supported types: system"
+            )
 
     def load_schedule(self) -> None:
         """Load commands from YAML and schedule them.
