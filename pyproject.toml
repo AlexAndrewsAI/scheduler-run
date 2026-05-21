@@ -1,6 +1,6 @@
 [project]
 name = "scheduler-run"
-version = "0.1.0"
+version = "0.1.1"
 description = "A scheduler that runs commands from a YAML file"
 readme = "README.md"
 requires-python = ">=3.10"
