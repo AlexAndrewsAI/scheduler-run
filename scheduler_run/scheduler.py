@@ -183,12 +183,19 @@ class Scheduler:
         Reads the YAML file(s) specified in config.yaml_path and schedules
         each command to run daily at the specified time. Multiple YAML files
         are merged as if they were a single concatenated file.
+
+        This method uses a two-phase approach for atomicity:
+        1. Load and validate all YAML files into memory
+        2. Schedule all validated entries in one pass
+
+        If any file fails to load or validate, no changes are made to the
+        scheduled commands.
         """
-        schedule.clear()
-        self.scheduled_commands.clear()
         yaml_paths = self.config.yaml_paths
         logging.info(f"Loading schedule from {len(yaml_paths)} YAML file(s)")
 
+        # Phase 1: Load and validate all YAML files
+        all_entries: list[ScheduleEntry] = []
         seen_entries: set[tuple[str, str, str, int, int, int]] = set()
 
         for yaml_path in yaml_paths:
@@ -224,14 +231,7 @@ class Scheduler:
                                         f"time='{entry.time}', delay={entry.delay}, "
                                         f"repetitions={entry.repetitions}, interval={entry.interval}"
                                     )
-                                    self._schedule_command(
-                                        entry.type,
-                                        entry.command,
-                                        entry.time,
-                                        entry.delay,
-                                        entry.repetitions,
-                                        entry.interval,
-                                    )
+                                    all_entries.append(entry)
                                 else:
                                     logging.warning(
                                         f"Duplicate entry detected in {yaml_path}: "
@@ -242,14 +242,7 @@ class Scheduler:
                                     )
                             else:
                                 seen_entries.add(entry_key)
-                                self._schedule_command(
-                                    entry.type,
-                                    entry.command,
-                                    entry.time,
-                                    entry.delay,
-                                    entry.repetitions,
-                                    entry.interval,
-                                )
+                                all_entries.append(entry)
                         except ValueError as e:
                             error_msg = (
                                 f"Skipping invalid entry in {yaml_path}: {entry_data}. "
@@ -268,6 +261,20 @@ class Scheduler:
             except (KeyError, ValueError) as e:
                 logging.error(f"Invalid YAML data in {yaml_path}: {e}")
                 raise
+
+        # Phase 2: Clear and schedule all validated entries
+        schedule.clear()
+        self.scheduled_commands.clear()
+
+        for entry in all_entries:
+            self._schedule_command(
+                entry.type,
+                entry.command,
+                entry.time,
+                entry.delay,
+                entry.repetitions,
+                entry.interval,
+            )
 
         # Log all scheduled commands
         logging.info("Scheduled commands:")
