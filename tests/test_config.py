@@ -104,12 +104,65 @@ def test_schedule_entry_repetitions_negative() -> None:
 
 def test_schedule_entry_interval_valid() -> None:
     """Test ScheduleEntry with valid interval."""
-    entry = ScheduleEntry(type="system", command="echo test", time="14:30", interval=60)
+    entry = ScheduleEntry(
+        type="system", command="echo test", time="14:30", repetitions=3, interval=60
+    )
     assert entry.interval == 60
 
     # Default interval should be -1
     entry_default = ScheduleEntry(type="system", command="echo test", time="14:30")
     assert entry_default.interval == -1
+
+
+def test_schedule_entry_interval_zero_with_repetitions() -> None:
+    """Test ScheduleEntry with interval=0 and repetitions>0 raises error."""
+    with pytest.raises(ValueError, match="Interval cannot be 0 when repetitions > 0"):
+        ScheduleEntry(
+            type="system", command="echo test", time="14:30", repetitions=3, interval=0
+        )
+
+
+def test_schedule_entry_interval_negative_with_repetitions() -> None:
+    """Test ScheduleEntry with negative interval (except -1) and repetitions>0 raises error."""
+    with pytest.raises(
+        ValueError,
+        match="Interval cannot be negative \\(except -1\\) when repetitions > 0",
+    ):
+        ScheduleEntry(
+            type="system", command="echo test", time="14:30", repetitions=3, interval=-5
+        )
+
+
+def test_schedule_entry_interval_positive_without_repetitions() -> None:
+    """Test ScheduleEntry with positive interval and repetitions=0 raises error."""
+    with pytest.raises(
+        ValueError, match="Interval .* is ignored when repetitions == 0"
+    ):
+        ScheduleEntry(
+            type="system", command="echo test", time="14:30", repetitions=0, interval=60
+        )
+
+
+def test_schedule_entry_interval_valid_with_repetitions() -> None:
+    """Test ScheduleEntry with valid interval and repetitions combinations."""
+    # interval=-1 with repetitions>0 (auto-calculation)
+    entry1 = ScheduleEntry(
+        type="system", command="echo test", time="14:30", repetitions=3, interval=-1
+    )
+    assert entry1.interval == -1
+    assert entry1.repetitions == 3
+
+    # interval>0 with repetitions>0
+    entry2 = ScheduleEntry(
+        type="system", command="echo test", time="14:30", repetitions=3, interval=60
+    )
+    assert entry2.interval == 60
+    assert entry2.repetitions == 3
+
+    # interval=-1 with repetitions=0 (default)
+    entry3 = ScheduleEntry(type="system", command="echo test", time="14:30")
+    assert entry3.interval == -1
+    assert entry3.repetitions == 0
 
 
 def test_config_list_of_paths() -> None:

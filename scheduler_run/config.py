@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Config(BaseModel):
@@ -200,3 +200,34 @@ class ScheduleEntry(BaseModel):
         if v < 0:
             raise ValueError("Repetitions must be a non-negative integer")
         return v
+
+    @model_validator(mode="after")
+    def validate_interval_with_repetitions(self) -> "ScheduleEntry":
+        """Validate that interval is consistent with repetitions.
+
+        Args:
+            self: The ScheduleEntry instance.
+
+        Returns:
+            The validated ScheduleEntry instance.
+
+        Raises:
+            ValueError: If interval is invalid for the given repetitions.
+        """
+        if self.repetitions > 0:
+            if self.interval == 0:
+                raise ValueError(
+                    "Interval cannot be 0 when repetitions > 0. "
+                    "Use -1 for auto-calculation or a positive value."
+                )
+            if self.interval < 0 and self.interval != -1:
+                raise ValueError(
+                    f"Interval cannot be negative (except -1) when repetitions > 0. "
+                    f"Got: {self.interval}"
+                )
+        elif self.repetitions == 0 and self.interval > 0:
+            raise ValueError(
+                f"Interval ({self.interval}) is ignored when repetitions == 0. "
+                "Set repetitions > 0 to use interval, or set interval to -1."
+            )
+        return self
