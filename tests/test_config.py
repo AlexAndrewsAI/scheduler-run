@@ -10,14 +10,14 @@ from scheduler_run.config import Config, ScheduleEntry
 def test_config_default() -> None:
     """Test Config with default values."""
     config = Config()
-    assert config.csv_path == Path("tests/schedule.csv")
+    assert config.yaml_path == Path("schedule.yaml")
 
 
 def test_config_custom_path() -> None:
-    """Test Config with custom csv_path."""
-    custom_path = Path("custom/schedule.csv")
-    config = Config(csv_path=custom_path)
-    assert config.csv_path == custom_path
+    """Test Config with custom yaml_path."""
+    custom_path = Path("custom/schedule.yaml")
+    config = Config(yaml_path=custom_path)
+    assert config.yaml_path == custom_path
 
 
 def test_config_model_title() -> None:

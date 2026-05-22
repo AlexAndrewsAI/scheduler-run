@@ -1,14 +1,14 @@
 [project]
 name = "scheduler-run"
-version = "0.1.0"
-description = "A scheduler that runs commands from a CSV file"
+version = "0.1.1"
+description = "A scheduler that runs commands from a YAML file"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "AlexAndrewsAI", email = "alex.andrews.ai@protonmail.com"}
 ]
-keywords = ["scheduler", "cron", "automation", "task-scheduler", "csv"]
+keywords = ["scheduler", "cron", "automation", "task-scheduler", "yaml"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -24,6 +24,7 @@ dependencies = [
     "pydantic>=2.0",
     "typer>=0.12.0",
     "schedule>=1.2.0",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]
@@ -32,6 +33,7 @@ dev = [
     "ruff",
     "mypy",
     "uv",
+    "types-pyyaml>=6.0.12.20260518",
 ]
 
 [project.scripts]
