@@ -68,6 +68,15 @@ def test_schedule_entry_empty_type() -> None:
         ScheduleEntry(type="   ", command="echo test", time="14:30")
 
 
+def test_schedule_entry_unsupported_type() -> None:
+    """Test ScheduleEntry with unsupported type."""
+    with pytest.raises(ValueError, match="Unsupported command type: 'unsupported'"):
+        ScheduleEntry(type="unsupported", command="echo test", time="14:30")
+
+    with pytest.raises(ValueError, match="Unsupported command type: 'systm'"):
+        ScheduleEntry(type="systm", command="echo test", time="14:30")
+
+
 def test_schedule_entry_delay_valid() -> None:
     """Test ScheduleEntry with valid delay."""
     entry = ScheduleEntry(type="system", command="echo test", time="14:30", delay=10)

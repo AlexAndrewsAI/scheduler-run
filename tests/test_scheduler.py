@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from scheduler_run.config import Config
 from scheduler_run.scheduler import Scheduler
@@ -121,7 +122,7 @@ def test_load_schedule_file_not_found(
 def test_load_schedule_invalid_entry(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with invalid YAML entries."""
+    """Test load_schedule with invalid YAML entries raises ValidationError."""
     yaml_file = tmp_path / "invalid_schedule.yaml"
     yaml_file.write_text(
         "schedules:\n"
@@ -135,7 +136,7 @@ def test_load_schedule_invalid_entry(
 
     config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.ERROR)
 
     with patch("scheduler_run.scheduler.schedule.every") as mock_every:
         mock_day = MagicMock()
@@ -143,9 +144,10 @@ def test_load_schedule_invalid_entry(
         mock_at = MagicMock()
         mock_day.at.return_value = mock_at
 
-        scheduler.load_schedule()
+        with pytest.raises(ValidationError):
+            scheduler.load_schedule()
 
-        assert "Skipping invalid entry" in caplog.text
+        assert "Invalid entry" in caplog.text
 
 
 def test_load_schedule_duplicate_entries(
@@ -245,52 +247,71 @@ def test_load_schedule_empty_list(
 def test_load_schedule_missing_type_key(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with entry missing 'type' key."""
+    """Test load_schedule with entry missing 'type' key raises ValidationError."""
     yaml_file = tmp_path / "missing_type.yaml"
     yaml_file.write_text("schedules:\n  - command: echo 'test'\n    time: '14:30'\n")
 
     config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.ERROR)
 
-    scheduler.load_schedule()
+    with pytest.raises(ValidationError):
+        scheduler.load_schedule()
 
-    assert "Skipping invalid entry" in caplog.text
-    assert len(scheduler.scheduled_commands) == 0
+    assert "Invalid entry" in caplog.text
 
 
 def test_load_schedule_missing_command_key(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with entry missing 'command' key."""
+    """Test load_schedule with entry missing 'command' key raises ValidationError."""
     yaml_file = tmp_path / "missing_command.yaml"
     yaml_file.write_text("schedules:\n  - type: system\n    time: '14:30'\n")
 
     config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.ERROR)
 
-    scheduler.load_schedule()
+    with pytest.raises(ValidationError):
+        scheduler.load_schedule()
 
-    assert "Skipping invalid entry" in caplog.text
-    assert len(scheduler.scheduled_commands) == 0
+    assert "Invalid entry" in caplog.text
 
 
 def test_load_schedule_missing_time_key(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with entry missing 'time' key."""
+    """Test load_schedule with entry missing 'time' key raises ValidationError."""
     yaml_file = tmp_path / "missing_time.yaml"
     yaml_file.write_text("schedules:\n  - type: system\n    command: echo 'test'\n")
 
     config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.ERROR)
 
-    scheduler.load_schedule()
+    with pytest.raises(ValidationError):
+        scheduler.load_schedule()
 
-    assert "Skipping invalid entry" in caplog.text
-    assert len(scheduler.scheduled_commands) == 0
+    assert "Invalid entry" in caplog.text
+
+
+def test_load_schedule_unsupported_type(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with unsupported type raises ValidationError."""
+    yaml_file = tmp_path / "unsupported_type.yaml"
+    yaml_file.write_text(
+        "schedules:\n  - type: systm\n    command: echo 'test'\n    time: '14:30'\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with pytest.raises(ValidationError, match="Unsupported command type"):
+        scheduler.load_schedule()
+
+    assert "Invalid entry" in caplog.text
 
 
 def test_schedule_command_with_delay(caplog: pytest.LogCaptureFixture) -> None:

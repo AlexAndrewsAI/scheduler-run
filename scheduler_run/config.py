@@ -149,8 +149,8 @@ class ScheduleEntry(BaseModel):
 
     @field_validator("type")
     @classmethod
-    def validate_type_not_empty(cls, v: str) -> str:
-        """Validate that type is not empty.
+    def validate_type_supported(cls, v: str) -> str:
+        """Validate that type is not empty and is a supported type.
 
         Args:
             v: The type string to validate.
@@ -159,10 +159,15 @@ class ScheduleEntry(BaseModel):
             The validated type string.
 
         Raises:
-            ValueError: If the type is empty.
+            ValueError: If the type is empty or unsupported.
         """
         if not v.strip():
             raise ValueError("Type cannot be empty")
+        supported_types = {"system"}
+        if v not in supported_types:
+            raise ValueError(
+                f"Unsupported command type: '{v}'. Supported types: {', '.join(sorted(supported_types))}"
+            )
         return v
 
     @field_validator("delay")

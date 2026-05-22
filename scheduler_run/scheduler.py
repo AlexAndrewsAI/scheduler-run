@@ -13,6 +13,7 @@ import time
 
 import schedule
 import yaml
+from pydantic import ValidationError
 
 from scheduler_run.config import Config, ScheduleEntry
 
@@ -243,12 +244,13 @@ class Scheduler:
                             else:
                                 seen_entries.add(entry_key)
                                 all_entries.append(entry)
-                        except ValueError as e:
+                        except ValidationError as e:
                             error_msg = (
-                                f"Skipping invalid entry in {yaml_path}: {entry_data}. "
+                                f"Invalid entry in {yaml_path}: {entry_data}. "
                                 f"Error: {e}"
                             )
-                            logging.warning(error_msg)
+                            logging.error(error_msg)
+                            raise
             except FileNotFoundError:
                 logging.error(f"YAML file not found: {yaml_path}")
                 raise
