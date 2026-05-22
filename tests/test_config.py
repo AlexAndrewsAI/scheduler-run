@@ -10,14 +10,14 @@ from scheduler_run.config import Config, ScheduleEntry
 def test_config_default() -> None:
     """Test Config with default values."""
     config = Config()
-    assert config.yaml_path == Path("schedule.yaml")
+    assert config.yaml_paths == [Path("schedule.yaml")]
 
 
 def test_config_custom_path() -> None:
     """Test Config with custom yaml_path."""
     custom_path = Path("custom/schedule.yaml")
     config = Config(yaml_path=custom_path)
-    assert config.yaml_path == custom_path
+    assert config.yaml_paths == [custom_path]
 
 
 def test_config_model_title() -> None:
@@ -66,3 +66,78 @@ def test_schedule_entry_empty_type() -> None:
 
     with pytest.raises(ValueError, match="Type cannot be empty"):
         ScheduleEntry(type="   ", command="echo test", time="14:30")
+
+
+def test_schedule_entry_delay_valid() -> None:
+    """Test ScheduleEntry with valid delay."""
+    entry = ScheduleEntry(type="system", command="echo test", time="14:30", delay=10)
+    assert entry.delay == 10
+
+    # Default delay should be 0
+    entry_default = ScheduleEntry(type="system", command="echo test", time="14:30")
+    assert entry_default.delay == 0
+
+
+def test_schedule_entry_delay_negative() -> None:
+    """Test ScheduleEntry with negative delay."""
+    with pytest.raises(ValueError, match="Delay must be a non-negative integer"):
+        ScheduleEntry(type="system", command="echo test", time="14:30", delay=-5)
+
+
+def test_schedule_entry_repetitions_valid() -> None:
+    """Test ScheduleEntry with valid repetitions."""
+    entry = ScheduleEntry(
+        type="system", command="echo test", time="14:30", repetitions=3
+    )
+    assert entry.repetitions == 3
+
+    # Default repetitions should be 0
+    entry_default = ScheduleEntry(type="system", command="echo test", time="14:30")
+    assert entry_default.repetitions == 0
+
+
+def test_schedule_entry_repetitions_negative() -> None:
+    """Test ScheduleEntry with negative repetitions."""
+    with pytest.raises(ValueError, match="Repetitions must be a non-negative integer"):
+        ScheduleEntry(type="system", command="echo test", time="14:30", repetitions=-5)
+
+
+def test_schedule_entry_interval_valid() -> None:
+    """Test ScheduleEntry with valid interval."""
+    entry = ScheduleEntry(type="system", command="echo test", time="14:30", interval=60)
+    assert entry.interval == 60
+
+    # Default interval should be -1
+    entry_default = ScheduleEntry(type="system", command="echo test", time="14:30")
+    assert entry_default.interval == -1
+
+
+def test_config_list_of_paths() -> None:
+    """Test Config with a list of paths."""
+    paths = [Path("schedule1.yaml"), Path("schedule2.yaml")]
+    config = Config(yaml_path=paths)
+    assert config.yaml_paths == paths
+
+
+def test_config_string_path() -> None:
+    """Test Config with a string path (converted to Path)."""
+    config = Config(yaml_path="custom.yaml")
+    assert config.yaml_paths == [Path("custom.yaml")]
+
+
+def test_config_list_of_strings() -> None:
+    """Test Config with a list of strings (converted to Paths)."""
+    config = Config(yaml_path=["schedule1.yaml", "schedule2.yaml"])
+    assert config.yaml_paths == [Path("schedule1.yaml"), Path("schedule2.yaml")]
+
+
+def test_config_allow_duplicates_default() -> None:
+    """Test Config default allow_duplicates value."""
+    config = Config()
+    assert config.allow_duplicates is False
+
+
+def test_config_allow_duplicates_true() -> None:
+    """Test Config with allow_duplicates set to True."""
+    config = Config(allow_duplicates=True)
+    assert config.allow_duplicates is True

@@ -19,17 +19,20 @@ app = typer.Typer(
 
 @app.callback()
 def main(
-    input: Path = typer.Option(
-        Path("schedule.yaml"),
-        "--input",
-        "-i",
-        help="Path to the YAML file containing scheduled commands "
+    files: list[Path] = typer.Argument(
+        None,
+        help="Path(s) to YAML file(s) containing scheduled commands "
         "(default: schedule.yaml)",
     ),
+    allow_duplicates: bool = typer.Option(
+        False,
+        "--allow-duplicates",
+        help="Allow duplicate schedule entries",
+    ),
 ) -> None:
-    """Run the scheduler with commands from a YAML file.
+    """Run the scheduler with commands from YAML file(s).
 
-    The YAML file should have a 'schedules' key with a list of entries,
+    The YAML file(s) should have a 'schedules' key with a list of entries,
     each containing: type, command, time
     Example:
         schedules:
@@ -38,7 +41,8 @@ def main(
             time: '14:10'
 
     Args:
-        input: Path to the YAML file containing scheduled commands.
+        files: List of paths to YAML files containing scheduled commands.
+               If not provided, defaults to schedule.yaml in the current directory.
     """
     # Configure logging to display messages only if not already configured
     if not logging.getLogger().handlers:
@@ -48,7 +52,11 @@ def main(
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-    config = Config(yaml_path=input)
+    # Default to schedule.yaml if no files provided
+    if not files:
+        files = [Path("schedule.yaml")]
+
+    config = Config(yaml_path=files, allow_duplicates=allow_duplicates)
     scheduler = Scheduler(config)
     scheduler.run()
 
