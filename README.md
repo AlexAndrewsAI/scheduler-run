@@ -29,7 +29,7 @@ The scheduler reads a YAML file with entries containing: `type`, `command`, and 
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/AlexAndrewsAI/python-package-template.git
+git clone https://github.com/AlexAndrewsAI/scheduler-run.git
 cd scheduler-run
 uv sync
 ```
@@ -42,6 +42,9 @@ Create a YAML file with a `schedules` key containing a list of entries:
 - `type`: The type of command (currently only "system" is supported)
 - `command`: The command to execute
 - `time`: The time to run the command in 24-hour format (e.g., "14:10")
+- `delay`: The base delay in seconds (optional, defaults to 0). If specified, a random start delay is calculated based on a gaussian distribution: `max(0, int(random.gauss(mu=delay, sigma=0.15 * delay)))`
+- `repetitions`: Number of times to repeat the command (optional, defaults to 0). If greater than 0, the command will run `repetitions + 1` times total.
+- `interval`: Time offset in seconds from the base time for each repetition (optional, defaults to -1). Only used when `repetitions > 0`. The timing for repetition `i` is calculated as `base_time + (i * interval) + delay_i`, where `delay_i` is a random delay recalculated for each execution. If set to -1 and `repetitions > 0`, the interval is auto-calculated to spread runs evenly throughout the day: `24*3600 / (repetitions + 1)`
 
 Example `schedule.yaml`:
 ```yaml
@@ -49,12 +52,19 @@ schedules:
   - type: system
     command: echo 'hello world'
     time: '14:10'
+    delay: 10
   - type: system
     command: echo 'good morning'
     time: '08:00'
+    delay: 0
   - type: system
     command: echo 'good night'
     time: '22:00'
+  - type: system
+    command: echo 'repeated task'
+    time: '09:00'
+    repetitions: 3
+    interval: 3600
 ```
 
 ### Command Line Interface
@@ -65,8 +75,14 @@ Run the scheduler using the CLI:
 # Run with default schedule.yaml
 uv run scheduler-run
 
-# Run with a custom YAML file
-uv run scheduler-run --input path/to/your/schedule.yaml
+# Run with a custom YAML file (positional argument)
+uv run scheduler-run path/to/your/schedule.yaml
+
+# Run with multiple YAML files
+uv run scheduler-run schedule1.yaml schedule2.yaml
+
+# Allow duplicate schedule entries
+uv run scheduler-run --allow-duplicates schedule.yaml
 
 # Show help
 uv run scheduler-run --help
@@ -77,7 +93,7 @@ uv run scheduler-run --help
 To test the scheduler with the example schedule.yaml file:
 
 ```bash
-uv run scheduler-run --input tests/schedule.yaml
+uv run scheduler-run tests/schedule.yaml
 ```
 
 The scheduler will load the commands from the YAML file and run them at the specified times. Press Ctrl+C to stop the scheduler.
@@ -119,7 +135,7 @@ uv run pytest
 
 # Run with verbose output
 uv run pytest -v
-uv run scheduler-run 
+
 # Show print statements during tests
 uv run pytest -s
 ```
@@ -143,7 +159,7 @@ scheduler-run/
 ├── README.md
 ├── scheduler_run/
 │   ├── __init__.py
-│   ├uv run scheduler-run ── cli.py
+│   ├── cli.py
 │   ├── config.py
 │   └── scheduler.py
 └── tests/
@@ -156,26 +172,13 @@ scheduler-run/
 ```
 
 ## Features
-uv run scheduler-run 
-- **YAML-based scheduling**: Define commands and times in a simuv run scheduler-run uv run scheduler-run ple YAML format
-- **Type hints**: Full type annotuv run scheduler-run ations for better IDE support and mypy compatibility
+- **YAML-based scheduling**: Define commands and times in a simple YAML format
+- **Type hints**: Full type annotations for better IDE support and mypy compatibility
 - **Pydantic validation**: Runtime type validation and configuration management
-- **CLI interface**: Easy-uv run scheduler-run to-use command line interface with typer
-- **Tuv run scheduler-run esting**: Comprehensive test suite with pytest
+- **CLI interface**: Easy-to-use command line interface with typer
+- **Testing**: Comprehensive test suite with pytest
 - **Code quality**: Automated linting with ruff and type checking with mypy
 - **Flexible scheduling**: Uses the schedule library for reliable task execution
-
-## Python Best Practices Used
-
-- ✅ **Type hints**: All functions and classes use type annotations
-- ✅ **Docstrings**: Clear descriptions of modules, classes, and functions
-- ✅ **Project structure**: Proper package layout with separation of concerns
-- ✅ **Testing**: Comprehensive test coverage with pytest
-- ✅ **Configuration**: Externalized config using pydantic BaseModel
-- ✅ **Linting**: Code quality checks with ruff
-- ✅ **Dependency management**: Explicit dependencies in pyproject.toml
-- ✅ **Python versions**: Supports Python 3.8+
-
 
 ## Disclaimer
 
@@ -186,9 +189,6 @@ This software is intended for personal use and is provided "as is", without any 
 
 MIT
 
-## Contributing
-
-This is a template repository. Feel free to use it as a starting point for your own projects.
 
 ## Author
 

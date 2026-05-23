@@ -1,6 +1,9 @@
 REVIEW.md
 schedule.csv
 
+# AI Agents
+.antigravitycli/
+
 # Python
 __pycache__/
 *.py[cod]
