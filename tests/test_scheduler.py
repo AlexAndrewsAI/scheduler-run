@@ -873,3 +873,44 @@ def test_load_schedule_clears_global_registry(
         assert second_call_count == 2
         assert mock_clear.call_count == 2
         assert len(scheduler.scheduled_commands) == 1
+
+
+def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that repetition timing uses base_time + (i * interval) + delay_i, not interval after previous run."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    with (
+        patch("scheduler_run.scheduler.schedule.every") as mock_every,
+        patch("scheduler_run.scheduler.random.gauss") as mock_gauss,
+    ):
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        # Mock delays: 10s, 20s, 30s for each execution
+        mock_gauss.side_effect = [10.0, 20.0, 30.0]
+
+        # Base time: 10:00, interval: 3600s (1 hour), repetitions: 2
+        # Expected timing:
+        # - Execution 0: 10:00 + 10s = 10:00:10
+        # - Execution 1: 10:00 + 3600s + 20s = 11:00:20
+        # - Execution 2: 10:00 + 7200s + 30s = 12:00:30
+        scheduler._schedule_command(
+            "system", "echo 'test'", "10:00", delay=10, repetitions=2, interval=3600
+        )
+
+        # Verify 3 executions were scheduled
+        assert mock_every.call_count == 3
+        assert len(scheduler.scheduled_commands) == 3
+
+        # Verify the scheduled times match expected timing
+        scheduled_times = [cmd[2] for cmd in scheduler.scheduled_commands]
+        assert "10:00:10" in scheduled_times
+        assert "11:00:20" in scheduled_times
+        assert "12:00:30" in scheduled_times
+
+        # Verify delays were recalculated for each execution
+        delays = [cmd[3] for cmd in scheduler.scheduled_commands]
+        assert delays == [10, 20, 30]

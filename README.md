@@ -44,7 +44,7 @@ Create a YAML file with a `schedules` key containing a list of entries:
 - `time`: The time to run the command in 24-hour format (e.g., "14:10")
 - `delay`: The base delay in seconds (optional, defaults to 0). If specified, a random start delay is calculated based on a gaussian distribution: `max(0, int(random.gauss(mu=delay, sigma=0.15 * delay)))`
 - `repetitions`: Number of times to repeat the command (optional, defaults to 0). If greater than 0, the command will run `repetitions + 1` times total.
-- `interval`: Time in seconds between repetitions (optional, defaults to -1). Only used when `repetitions > 0`. If set to -1 and `repetitions > 0`, the interval is auto-calculated to spread runs evenly throughout the day: `24*3600 / (repetitions + 1)`
+- `interval`: Time offset in seconds from the base time for each repetition (optional, defaults to -1). Only used when `repetitions > 0`. The timing for repetition `i` is calculated as `base_time + (i * interval) + delay_i`, where `delay_i` is a random delay recalculated for each execution. If set to -1 and `repetitions > 0`, the interval is auto-calculated to spread runs evenly throughout the day: `24*3600 / (repetitions + 1)`
 
 Example `schedule.yaml`:
 ```yaml

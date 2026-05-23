@@ -112,9 +112,12 @@ class ScheduleEntry(BaseModel):
     interval: int = Field(
         default=-1,
         description=(
-            "Time in seconds between repetitions (only used when repetitions > 0). "
-            "If set to -1 and repetitions > 0, the interval is auto-calculated "
-            "to spread runs evenly throughout the day: 24*3600 / (repetitions + 1)"
+            "Time offset in seconds from the base time for each repetition "
+            "(only used when repetitions > 0). The timing for repetition i is "
+            "calculated as base_time + (i * interval) + delay_i, where delay_i "
+            "is a random delay recalculated for each execution. If set to -1 and "
+            "repetitions > 0, the interval is auto-calculated to spread runs "
+            "evenly throughout the day: 24*3600 / (repetitions + 1)"
         ),
     )
 
