@@ -914,3 +914,193 @@ def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
         # Verify delays were recalculated for each execution
         delays = [cmd[3] for cmd in scheduler.scheduled_commands]
         assert delays == [10, 20, 30]
+
+
+def test_load_schedule_multiple_files_second_missing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with multiple files where second file is missing after first loads."""
+    yaml_file1 = tmp_path / "schedule1.yaml"
+    yaml_file1.write_text(
+        "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
+    )
+    yaml_file2 = tmp_path / "schedule2.yaml"
+    # Don't create yaml_file2 - it should be missing
+
+    config = Config(yaml_path=[yaml_file1, yaml_file2])
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        with pytest.raises(FileNotFoundError):
+            scheduler.load_schedule()
+
+        # Verify first file was loaded before error
+        assert f"Loading schedule from {yaml_file1}" in caplog.text
+        assert f"YAML file not found: {yaml_file2}" in caplog.text
+        # Verify no commands were scheduled due to atomicity
+        assert mock_every.call_count == 0
+        assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_non_dict_list_item(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with non-dict YAML list items (e.g., - 'oops')."""
+    yaml_file = tmp_path / "invalid_list.yaml"
+    yaml_file.write_text(
+        "schedules:\n  - 'oops'\n  - type: system\n    command: echo 'test'\n    time: '14:30'\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        with pytest.raises(ValueError):
+            scheduler.load_schedule()
+
+        assert "Invalid entry" in caplog.text
+        # Verify no commands were scheduled due to atomicity
+        assert mock_every.call_count == 0
+        assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_unsupported_type_explicit(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with explicitly unsupported type (not just typo)."""
+    yaml_file = tmp_path / "unsupported_type.yaml"
+    yaml_file.write_text(
+        "schedules:\n  - type: shell\n    command: echo 'test'\n    time: '14:30'\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        with pytest.raises(ValidationError, match="Unsupported command type"):
+            scheduler.load_schedule()
+
+        assert "Invalid entry" in caplog.text
+        assert "shell" in caplog.text
+        # Verify no commands were scheduled due to atomicity
+        assert mock_every.call_count == 0
+        assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_clears_schedule_actually(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test that load_schedule actually clears the schedule on reload (not just mocked)."""
+    yaml_file = tmp_path / "test_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        # First load
+        scheduler.load_schedule()
+        assert len(scheduler.scheduled_commands) == 1
+        first_command = scheduler.scheduled_commands[0]
+
+        # Second load (reload)
+        scheduler.load_schedule()
+        assert len(scheduler.scheduled_commands) == 1
+        second_command = scheduler.scheduled_commands[0]
+
+        # Verify the scheduled_commands list was actually cleared
+        # (not just appended to)
+        assert first_command == second_command
+        assert mock_every.call_count == 2
+
+
+def test_load_schedule_interval_zero_with_repetitions(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with interval=0 and repetitions>0 raises ValidationError."""
+    yaml_file = tmp_path / "invalid_interval.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo 'test'\n"
+        "    time: '14:30'\n"
+        "    repetitions: 3\n"
+        "    interval: 0\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        with pytest.raises(ValidationError, match="Interval cannot be 0"):
+            scheduler.load_schedule()
+
+        assert "Invalid entry" in caplog.text
+        # Verify no commands were scheduled due to atomicity
+        assert mock_every.call_count == 0
+        assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_interval_negative_with_repetitions(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule with negative interval (except -1) and repetitions>0 raises ValidationError."""
+    yaml_file = tmp_path / "invalid_interval_negative.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo 'test'\n"
+        "    time: '14:30'\n"
+        "    repetitions: 3\n"
+        "    interval: -5\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        mock_day = MagicMock()
+        mock_every.return_value.day = mock_day
+        mock_at = MagicMock()
+        mock_day.at.return_value = mock_at
+
+        with pytest.raises(ValidationError, match="Interval cannot be negative"):
+            scheduler.load_schedule()
+
+        assert "Invalid entry" in caplog.text
+        # Verify no commands were scheduled due to atomicity
+        assert mock_every.call_count == 0
+        assert len(scheduler.scheduled_commands) == 0

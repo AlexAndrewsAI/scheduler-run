@@ -36,7 +36,16 @@ def test_schedule_entry_valid() -> None:
 
 def test_schedule_entry_valid_time_formats() -> None:
     """Test ScheduleEntry with various valid time formats."""
-    valid_times = ["00:00", "01:00", "09:00", "12:00", "13:00", "23:59", "08:00", "9:00"]
+    valid_times = [
+        "00:00",
+        "01:00",
+        "09:00",
+        "12:00",
+        "13:00",
+        "23:59",
+        "08:00",
+        "9:00",
+    ]
     for time_str in valid_times:
         entry = ScheduleEntry(type="system", command="echo test", time=time_str)
         assert entry.time == time_str

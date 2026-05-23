@@ -217,6 +217,10 @@ class Scheduler:
 
                     for entry_data in data["schedules"]:
                         try:
+                            if not isinstance(entry_data, dict):
+                                error_msg = f"Invalid entry in {yaml_path}: expected dict, got {type(entry_data).__name__}: {entry_data}"
+                                logging.error(error_msg)
+                                raise ValueError(error_msg)
                             entry = ScheduleEntry(**entry_data)
                             entry_key = (
                                 entry.type,
