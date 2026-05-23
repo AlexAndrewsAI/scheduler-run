@@ -135,7 +135,7 @@ uv run pytest
 
 # Run with verbose output
 uv run pytest -v
-uv run scheduler-run 
+
 # Show print statements during tests
 uv run pytest -s
 ```
