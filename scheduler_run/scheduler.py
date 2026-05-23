@@ -49,6 +49,8 @@ class Scheduler:
         try:
             args = shlex.split(command)
             subprocess.run(args, check=True)
+        except FileNotFoundError as e:
+            logging.error(f"Command not found: {command}. Error: {e}")
         except subprocess.CalledProcessError as e:
             logging.error(f"Command failed: {command}. Error: {e}")
 
@@ -230,7 +232,8 @@ class Scheduler:
                                         f"Allowing duplicate entry in {yaml_path}: "
                                         f"type='{entry.type}', command='{entry.command}', "
                                         f"time='{entry.time}', delay={entry.delay}, "
-                                        f"repetitions={entry.repetitions}, interval={entry.interval}"
+                                        f"repetitions={entry.repetitions}, "
+                                        f"interval={entry.interval}"
                                     )
                                     all_entries.append(entry)
                                 else:
@@ -238,8 +241,9 @@ class Scheduler:
                                         f"Duplicate entry detected in {yaml_path}: "
                                         f"type='{entry.type}', command='{entry.command}', "
                                         f"time='{entry.time}', delay={entry.delay}, "
-                                        f"repetitions={entry.repetitions}, interval={entry.interval}. "
-                                        "Use allow_duplicates=True to permit."
+                                        f"repetitions={entry.repetitions}, "
+                                        f"interval={entry.interval}. "
+                                        "Use allow_duplicates=True or --allow-duplicates to permit."
                                     )
                             else:
                                 seen_entries.add(entry_key)
@@ -273,9 +277,9 @@ class Scheduler:
                 entry.type,
                 entry.command,
                 entry.time,
-                entry.delay,
-                entry.repetitions,
-                entry.interval,
+                delay=entry.delay,
+                repetitions=entry.repetitions,
+                interval=entry.interval,
             )
 
         # Log all scheduled commands

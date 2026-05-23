@@ -35,7 +35,7 @@ This project is a scheduler that runs commands from a YAML file, built with mode
 
 ## Project Structure
 - `scheduler_run/`: Core logic.
-    - `config.py`: Pydantic models for configuration.
+    - `config.py`: Pydantic models for configuration (Config, ScheduleEntry with fields: type, command, time, delay, repetitions, interval).
     - `scheduler.py`: Core scheduling logic.
     - `cli.py`: Typer-based CLI entry point.
 - `tests/`: Pytest suite.
