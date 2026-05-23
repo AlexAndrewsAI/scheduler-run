@@ -1,20 +1,15 @@
 schedules:
 - type: system
-  command: echo 'hello world'
-  time: '14:10'
-  repetitions: 3
-  interval: 60
-  delay: 10
+  command: echo 'good morning'
+  time: '08:00'
 - type: system
-  command: echo "4x per day"
-  time: '10:00'
-  repetitions: 3
+  command: echo 'with delay'
+  time: '09:00'
   delay: 30
 - type: system
-  command: echo 'good morning'
-  time: 08:00
-- type: system
-  command: echo 'good night'
-  time: '11:51'
+  command: echo 'with repetition'
+  time: '10:00'
+  repetitions: 1
+  interval: 3600
 
 
