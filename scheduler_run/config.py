@@ -15,7 +15,9 @@ class Config(BaseModel):
 
     Attributes:
         yaml_path: Path(s) to the YAML file(s) containing scheduled commands.
-            Can be a string, Path, or a list of strings/Paths.
+            Accepts a string, Path, or a list of strings/Paths at construction
+            time.  Always normalised to ``list[Path]`` at runtime by the
+            validator; use the :attr:`yaml_paths` property for typed access.
         allow_duplicates: Whether to allow duplicate schedule entries.
             If False (default), duplicate entries are detected and skipped.
     """
@@ -33,20 +35,27 @@ class Config(BaseModel):
 
     @property
     def yaml_paths(self) -> list[Path]:
-        """Get yaml_path as a normalized list of Paths.
+        """Return yaml_path as a normalised list of Paths.
+
+        The ``yaml_path`` field accepts flexible input types that mypy must be
+        able to type-check at call sites.  This property is the single place
+        that performs the final cast, giving callers a ``list[Path]`` with a
+        correct static type.
 
         Returns:
-            A list of Path objects.
+            A list of Path objects derived from ``yaml_path``.
         """
-        if isinstance(self.yaml_path, str):
-            return [Path(self.yaml_path)]
-        if isinstance(self.yaml_path, Path):
-            return [self.yaml_path]
-        if isinstance(self.yaml_path, list):
-            return [
-                Path(item) if isinstance(item, str) else item for item in self.yaml_path
-            ]
-        return [Path("schedule.yaml")]
+        v = self.yaml_path
+        # The field_validator already runs mode="before", so at runtime v is
+        # always list[Path].  The isinstance checks below satisfy mypy so that
+        # the return type is unambiguously list[Path] without a cast().
+        if isinstance(v, str):
+            return [Path(v)]
+        if isinstance(v, Path):
+            return [v]
+        if isinstance(v, list):
+            return [Path(item) if isinstance(item, str) else item for item in v]
+        return [Path("schedule.yaml")]  # unreachable, but makes mypy happy
 
     @field_validator("yaml_path", mode="before")
     @classmethod

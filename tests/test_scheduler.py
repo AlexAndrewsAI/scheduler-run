@@ -16,7 +16,7 @@ from scheduler_run.scheduler import Scheduler
 def test_scheduler_init_default_config() -> None:
     """Test Scheduler initialization with default config."""
     scheduler = Scheduler()
-    assert scheduler.config.yaml_paths == [Path("schedule.yaml")]
+    assert scheduler.config.yaml_path == [Path("schedule.yaml")]
 
 
 def test_scheduler_init_custom_config() -> None:
@@ -24,7 +24,7 @@ def test_scheduler_init_custom_config() -> None:
     custom_path = Path("custom/schedule.yaml")
     config = Config(yaml_path=custom_path)
     scheduler = Scheduler(config)
-    assert scheduler.config.yaml_paths == [custom_path]
+    assert scheduler.config.yaml_path == [custom_path]
 
 
 def test_run_system_command_success(caplog: pytest.LogCaptureFixture) -> None:
