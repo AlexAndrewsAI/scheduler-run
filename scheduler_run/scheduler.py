@@ -218,7 +218,10 @@ class Scheduler:
                     for entry_data in data["schedules"]:
                         try:
                             if not isinstance(entry_data, dict):
-                                error_msg = f"Invalid entry in {yaml_path}: expected dict, got {type(entry_data).__name__}: {entry_data}"
+                                error_msg = (
+                                    f"Invalid entry in {yaml_path}: expected dict, "
+                                    f"got {type(entry_data).__name__}: {entry_data}"
+                                )
                                 logging.error(error_msg)
                                 raise ValueError(error_msg)
                             entry = ScheduleEntry(**entry_data)
@@ -234,7 +237,8 @@ class Scheduler:
                                 if self.config.allow_duplicates:
                                     logging.info(
                                         f"Allowing duplicate entry in {yaml_path}: "
-                                        f"type='{entry.type}', command='{entry.command}', "
+                                        f"type='{entry.type}', "
+                                        f"command='{entry.command}', "
                                         f"time='{entry.time}', delay={entry.delay}, "
                                         f"repetitions={entry.repetitions}, "
                                         f"interval={entry.interval}"
@@ -243,11 +247,13 @@ class Scheduler:
                                 else:
                                     logging.warning(
                                         f"Duplicate entry detected in {yaml_path}: "
-                                        f"type='{entry.type}', command='{entry.command}', "
+                                        f"type='{entry.type}', "
+                                        f"command='{entry.command}', "
                                         f"time='{entry.time}', delay={entry.delay}, "
                                         f"repetitions={entry.repetitions}, "
                                         f"interval={entry.interval}. "
-                                        "Use allow_duplicates=True or --allow-duplicates to permit."
+                                        "Use allow_duplicates=True or "
+                                        "--allow-duplicates to permit."
                                     )
                             else:
                                 seen_entries.add(entry_key)

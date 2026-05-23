@@ -725,11 +725,13 @@ def test_load_schedule_multiple_files_duplicate_detection(
     """Test load_schedule with duplicate entries across multiple files."""
     yaml_file1 = tmp_path / "schedule1.yaml"
     yaml_file1.write_text(
-        "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n    delay: 0\n    repetitions: 0\n    interval: -1\n"
+        "schedules:\n  - type: system\n    command: echo 'hello'\n    "
+        "time: '14:10'\n    delay: 0\n    repetitions: 0\n    interval: -1\n"
     )
     yaml_file2 = tmp_path / "schedule2.yaml"
     yaml_file2.write_text(
-        "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n    delay: 0\n    repetitions: 0\n    interval: -1\n"
+        "schedules:\n  - type: system\n    command: echo 'hello'\n    "
+        "time: '14:10'\n    delay: 0\n    repetitions: 0\n    interval: -1\n"
     )
 
     config = Config(yaml_path=[yaml_file1, yaml_file2])
@@ -795,7 +797,8 @@ def test_load_schedule_allow_duplicates(
 def test_load_schedule_different_fields_not_duplicates(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test that entries with same type/command/time but different delay/repetitions/interval are NOT duplicates."""
+    """Test that entries with same type/command/time but different
+    delay/repetitions/interval are NOT duplicates."""
     yaml_file = tmp_path / "different_fields.yaml"
     yaml_file.write_text(
         "schedules:\n"
@@ -833,7 +836,8 @@ def test_load_schedule_different_fields_not_duplicates(
 
         # Should NOT detect duplicates since delay/repetitions/interval differ
         assert "Duplicate entry detected" not in caplog.text
-        # All 3 entries should be scheduled (1 + 1 + 3 = 5 executions due to repetitions)
+        # All 3 entries should be scheduled
+        # (1 + 1 + 3 = 5 executions due to repetitions)
         assert mock_every.call_count == 5
         assert len(scheduler.scheduled_commands) == 5
 
@@ -841,7 +845,8 @@ def test_load_schedule_different_fields_not_duplicates(
 def test_load_schedule_clears_global_registry(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test that load_schedule clears the global schedule registry to prevent duplicate jobs on reload."""
+    """Test that load_schedule clears the global schedule registry to prevent
+    duplicate jobs on reload."""
     yaml_file = tmp_path / "test_schedule.yaml"
     yaml_file.write_text(
         "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
@@ -876,7 +881,8 @@ def test_load_schedule_clears_global_registry(
 
 
 def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
-    """Test that repetition timing uses base_time + (i * interval) + delay_i, not interval after previous run."""
+    """Test that repetition timing uses base_time + (i * interval) + delay_i,
+    not interval after previous run."""
     scheduler = Scheduler()
     caplog.set_level(logging.INFO)
 
@@ -919,7 +925,8 @@ def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
 def test_load_schedule_multiple_files_second_missing(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with multiple files where second file is missing after first loads."""
+    """Test load_schedule with multiple files where second file is missing
+    after first loads."""
     yaml_file1 = tmp_path / "schedule1.yaml"
     yaml_file1.write_text(
         "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
@@ -954,7 +961,8 @@ def test_load_schedule_non_dict_list_item(
     """Test load_schedule with non-dict YAML list items (e.g., - 'oops')."""
     yaml_file = tmp_path / "invalid_list.yaml"
     yaml_file.write_text(
-        "schedules:\n  - 'oops'\n  - type: system\n    command: echo 'test'\n    time: '14:30'\n"
+        "schedules:\n  - 'oops'\n  - type: system\n    "
+        "command: echo 'test'\n    time: '14:30'\n"
     )
 
     config = Config(yaml_path=yaml_file)
@@ -1008,7 +1016,8 @@ def test_load_schedule_unsupported_type_explicit(
 def test_load_schedule_clears_schedule_actually(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test that load_schedule actually clears the schedule on reload (not just mocked)."""
+    """Test that load_schedule actually clears the schedule on reload
+    (not just mocked)."""
     yaml_file = tmp_path / "test_schedule.yaml"
     yaml_file.write_text(
         "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
@@ -1076,7 +1085,8 @@ def test_load_schedule_interval_zero_with_repetitions(
 def test_load_schedule_interval_negative_with_repetitions(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with negative interval (except -1) and repetitions>0 raises ValidationError."""
+    """Test load_schedule with negative interval (except -1) and
+    repetitions>0 raises ValidationError."""
     yaml_file = tmp_path / "invalid_interval_negative.yaml"
     yaml_file.write_text(
         "schedules:\n"

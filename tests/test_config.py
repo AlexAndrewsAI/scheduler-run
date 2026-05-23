@@ -141,7 +141,8 @@ def test_schedule_entry_interval_zero_with_repetitions() -> None:
 
 
 def test_schedule_entry_interval_negative_with_repetitions() -> None:
-    """Test ScheduleEntry with negative interval (except -1) and repetitions>0 raises error."""
+    """Test ScheduleEntry with negative interval (except -1) and
+    repetitions>0 raises error."""
     with pytest.raises(
         ValueError,
         match="Interval cannot be negative \\(except -1\\) when repetitions > 0",
@@ -154,7 +155,7 @@ def test_schedule_entry_interval_negative_with_repetitions() -> None:
 def test_schedule_entry_interval_positive_without_repetitions() -> None:
     """Test ScheduleEntry with positive interval and repetitions=0 raises error."""
     with pytest.raises(
-        ValueError, match="Interval .* is ignored when repetitions == 0"
+        ValueError, match=r"Interval .* is ignored when repetitions == 0"
     ):
         ScheduleEntry(
             type="system", command="echo test", time="14:30", repetitions=0, interval=60

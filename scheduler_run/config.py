@@ -181,8 +181,10 @@ class ScheduleEntry(BaseModel):
             raise ValueError("Type cannot be empty")
         supported_types = {"system"}
         if v not in supported_types:
+            supported_types_str = ", ".join(sorted(supported_types))
             raise ValueError(
-                f"Unsupported command type: '{v}'. Supported types: {', '.join(sorted(supported_types))}"
+                f"Unsupported command type: '{v}'. "
+                f"Supported types: {supported_types_str}"
             )
         return v
 
