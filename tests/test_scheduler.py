@@ -851,7 +851,10 @@ def test_load_schedule_clears_global_registry(
     scheduler = Scheduler(config)
     caplog.set_level(logging.INFO)
 
-    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+    with (
+        patch("scheduler_run.scheduler.schedule.every") as mock_every,
+        patch("scheduler_run.scheduler.schedule.clear") as mock_clear,
+    ):
         mock_day = MagicMock()
         mock_every.return_value.day = mock_day
         mock_at = MagicMock()
@@ -861,10 +864,12 @@ def test_load_schedule_clears_global_registry(
         scheduler.load_schedule()
         first_call_count = mock_every.call_count
         assert first_call_count == 1
+        assert mock_clear.call_count == 1
 
         scheduler.load_schedule()
         second_call_count = mock_every.call_count
 
-        # Verify schedule.clear() was called (mock_every should be called the same number of times each load)
+        # Verify schedule.clear() was called twice (once for each load_schedule)
         assert second_call_count == 2
+        assert mock_clear.call_count == 2
         assert len(scheduler.scheduled_commands) == 1
