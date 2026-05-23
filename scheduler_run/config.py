@@ -90,6 +90,10 @@ class ScheduleEntry(BaseModel):
             where single-digit hours (H:MM) are allowed in addition to
             two-digit hours (HH:MM).
         delay: Optional delay in seconds, which triggers a random start delay.
+        repetitions: Number of times to repeat the command (0 means no repetition).
+        interval: Time offset in seconds from the base time for each repetition
+            (only used when repetitions > 0). If set to -1 and repetitions > 0,
+            the interval is auto-calculated to spread runs evenly throughout the day.
     """
 
     type: str = Field(description="The type of command (e.g., 'system')")
