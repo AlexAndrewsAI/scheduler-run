@@ -249,3 +249,27 @@ def test_config_normalize_yaml_path_invalid_type() -> None:
     """Test validator rejects invalid yaml_path types."""
     with pytest.raises(TypeError, match="Invalid type for yaml_path"):
         Config(yaml_path=123)  # type: ignore[arg-type]
+
+
+def test_schedule_entry_command_list() -> None:
+    """Test ScheduleEntry with command as list is normalized to string."""
+    entry = ScheduleEntry(
+        type="system",
+        command=["sh", "-c", "echo 'hello'"],  # type: ignore[arg-type]
+        time="14:30",
+    )
+    assert entry.command == "sh -c 'echo '\"'\"'hello'\"'\"''"
+    assert isinstance(entry.command, str)
+
+
+def test_schedule_entry_command_string() -> None:
+    """Test ScheduleEntry with command as string remains string."""
+    entry = ScheduleEntry(type="system", command="echo 'hello'", time="14:30")
+    assert entry.command == "echo 'hello'"
+    assert isinstance(entry.command, str)
+
+
+def test_schedule_entry_command_empty_list() -> None:
+    """Test ScheduleEntry with empty command list raises error."""
+    with pytest.raises(ValueError, match="Command cannot be empty"):
+        ScheduleEntry(type="system", command=[], time="14:30")  # type: ignore[arg-type]

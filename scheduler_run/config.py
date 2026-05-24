@@ -4,6 +4,7 @@ Provides configuration management using Pydantic models.
 """
 
 import re
+import shlex
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -102,7 +103,7 @@ class ScheduleEntry(BaseModel):
     """
 
     type: str = Field(description="The type of command (e.g., 'system')")
-    command: str = Field(description="The command to execute")
+    command: str = Field(description="The command to execute (string or list of args)")
     time: str = Field(
         description=(
             "The time to run the command in 24h format (H:MM or HH:MM), "
@@ -151,6 +152,22 @@ class ScheduleEntry(BaseModel):
             raise ValueError(
                 f"Invalid time format: '{v}'. Expected format: H:MM or HH:MM (24-hour)"
             )
+        return v
+
+    @field_validator("command", mode="before")
+    @classmethod
+    def normalize_command(cls, v: str | list[str]) -> str:
+        """Normalize command to string format.
+
+        Args:
+            v: The command as string or list of args.
+
+        Returns:
+            The command as a string.
+
+        """
+        if isinstance(v, list):
+            return shlex.join(v)
         return v
 
     @field_validator("command")
