@@ -141,8 +141,7 @@ def test_schedule_entry_interval_zero_with_repetitions() -> None:
 
 
 def test_schedule_entry_interval_negative_with_repetitions() -> None:
-    """Test ScheduleEntry with negative interval (except -1) and
-    repetitions>0 raises error."""
+    """Test ScheduleEntry rejects negative interval when repetitions > 0."""
     with pytest.raises(
         ValueError,
         match="Interval cannot be negative \\(except -1\\) when repetitions > 0",
@@ -213,3 +212,40 @@ def test_config_allow_duplicates_true() -> None:
     """Test Config with allow_duplicates set to True."""
     config = Config(allow_duplicates=True)
     assert config.allow_duplicates is True
+
+
+def test_config_yaml_paths_from_string() -> None:
+    """Test yaml_paths when yaml_path is a raw string (bypasses validator)."""
+    config = Config.model_construct(yaml_path="foo.yaml")
+    assert config.yaml_paths == [Path("foo.yaml")]
+
+
+def test_config_yaml_paths_from_path() -> None:
+    """Test yaml_paths when yaml_path is a raw Path (bypasses validator)."""
+    path = Path("bar.yaml")
+    config = Config.model_construct(yaml_path=path)
+    assert config.yaml_paths == [path]
+
+
+def test_config_yaml_paths_from_list() -> None:
+    """Test yaml_paths when yaml_path is a mixed list (bypasses validator)."""
+    config = Config.model_construct(yaml_path=[Path("a.yaml"), "b.yaml"])
+    assert config.yaml_paths == [Path("a.yaml"), Path("b.yaml")]
+
+
+def test_config_yaml_paths_fallback() -> None:
+    """Test yaml_paths fallback for unexpected runtime types (mypy guard)."""
+    config = Config.model_construct(yaml_path=123)
+    assert config.yaml_paths == [Path("schedule.yaml")]
+
+
+def test_config_normalize_yaml_path_mixed_list() -> None:
+    """Test validator converts string items in a mixed path list to Path."""
+    config = Config(yaml_path=[Path("a.yaml"), "b.yaml"])
+    assert config.yaml_path == [Path("a.yaml"), Path("b.yaml")]
+
+
+def test_config_normalize_yaml_path_invalid_type() -> None:
+    """Test validator rejects invalid yaml_path types."""
+    with pytest.raises(TypeError, match="Invalid type for yaml_path"):
+        Config(yaml_path=123)  # type: ignore[arg-type]

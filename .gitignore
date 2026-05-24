@@ -1,83 +1,144 @@
 REVIEW.md
 schedule.csv
 
-# AI Agents
+# General
+*.lock
+!uv.lock
+
+# AI IDEs & Editors
+.aider/
+.aider.chat.history.md
+.blackbox/
+.cline/
+.cline_docs/
+.codium/
+.codeium/
+.continue/
+.copilot/
+.cursor/
+.cursor-server/
+.devin/
+.lm-studio/
+.lovable/
+.phind/
+.supermaven/
+.tabnine/
+.v0/
+.windsurf/
+
+# AI Agent Frameworks & CLI Tools
+.antigravity
 .antigravitycli/
+.autogpt
+.gpt-engineer/
+
+# AI Model Runners
+.ollama/
+
+# AI Agent Outputs & State Files
+.agent_state/
+.agentic/
+agent_artifacts/
+agent_logs/
+agent_output/
+agent_memory/
+
+# AI Tool Cache & Config
+.ai_cache/
+.ai_tmp/
+.llm/
+.llm_cache/
+conversation_history/
+
+# Local Model Files
+*.bin
+*.gguf
+*.pth
+*.safetensors
 
 # Python
-__pycache__/
+*.egg
+*.egg-info/
+*.ipynb_checkpoints/
 *.py[cod]
-*$py.class
 *.so
+*$py.class
+.eggs/
+.installed.cfg
+.pdm-python
 .Python
+__pycache__/
 build/
 develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
 lib/
 lib64/
+MANIFEST
 parts/
+pip-delete-this-directory.txt
+pip-log.txt
+pip-wheel-metadata/
 sdist/
+share/python-wheels/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# Virtual environments
-venv/
+# Virtual Environments
 .venv/
-env/
 ENV/
+env/
 env.bak/
+venv/
 venv.bak/
 
-# uv
-.venv/
-
 # Testing
-.pytest_cache/
 .coverage
 .coverage.*
-htmlcov/
-.tox/
 .hypothesis/
+.nox/
+.pytest_cache/
+.tox/
+htmlcov/
 
-# Type checking
-.mypy_cache/
+# Type Checking
 .dmypy.json
+.mypy_cache/
+.pyre/
+.pytype/
 dmypy.json
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-*.sublime-project
-*.sublime-workspace
-
-# Editor
-.vim/
-.emacs.desktop
-.emacs.desktop.lock
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-.env
-.env.local
 
 # Ruff
 .ruff_cache/
 
-# Project specific
+# IDE & Editors
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+.emacs.desktop
+.idea/
+.vim/
+.vscode/
+
+# Merge Conflicts
+*.orig
+*.rej
+
+# OS
+Thumbs.db
+
+# Secrets & Configuration
+.env
+.env.local
+.env.*.local
+
+# Project Specific
+*.db
 *.log
+*.sqlite
+*.sqlite3
 debug.log

@@ -20,9 +20,10 @@ class Config(BaseModel):
             validator; use the :attr:`yaml_paths` property for typed access.
         allow_duplicates: Whether to allow duplicate schedule entries.
             If False (default), duplicate entries are detected and skipped.
+
     """
 
-    yaml_path: str | Path | list[Path] | list[str] = Field(
+    yaml_path: str | Path | list[Path | str] = Field(
         default_factory=lambda: [Path("schedule.yaml")],
         description="Path(s) to the YAML file(s) containing scheduled commands",
     )
@@ -31,7 +32,7 @@ class Config(BaseModel):
         description="Whether to allow duplicate schedule entries",
     )
 
-    model_config = {"title": "Scheduler Config"}
+    model_config = {"title": "Scheduler Config", "frozen": True}
 
     @property
     def yaml_paths(self) -> list[Path]:
@@ -44,6 +45,7 @@ class Config(BaseModel):
 
         Returns:
             A list of Path objects derived from ``yaml_path``.
+
         """
         v = self.yaml_path
         # The field_validator already runs mode="before", so at runtime v is
@@ -70,6 +72,7 @@ class Config(BaseModel):
 
         Raises:
             TypeError: If the input type is invalid.
+
         """
         if isinstance(v, str):
             return [Path(v)]
@@ -94,6 +97,7 @@ class ScheduleEntry(BaseModel):
         interval: Time offset in seconds from the base time for each repetition
             (only used when repetitions > 0). If set to -1 and repetitions > 0,
             the interval is auto-calculated to spread runs evenly throughout the day.
+
     """
 
     type: str = Field(description="The type of command (e.g., 'system')")
@@ -125,6 +129,8 @@ class ScheduleEntry(BaseModel):
         ),
     )
 
+    model_config = {"title": "Schedule Entry", "frozen": True}
+
     @field_validator("time")
     @classmethod
     def validate_time_format(cls, v: str) -> str:
@@ -138,6 +144,7 @@ class ScheduleEntry(BaseModel):
 
         Raises:
             ValueError: If the time format is invalid.
+
         """
         if not re.match(r"^([01]?[0-9]|2[0-3]):[0-5][0-9]$", v):
             raise ValueError(
@@ -158,6 +165,7 @@ class ScheduleEntry(BaseModel):
 
         Raises:
             ValueError: If the command is empty.
+
         """
         if not v.strip():
             raise ValueError("Command cannot be empty")
@@ -176,6 +184,7 @@ class ScheduleEntry(BaseModel):
 
         Raises:
             ValueError: If the type is empty or unsupported.
+
         """
         if not v.strip():
             raise ValueError("Type cannot be empty")
@@ -201,6 +210,7 @@ class ScheduleEntry(BaseModel):
 
         Raises:
             ValueError: If the delay is negative.
+
         """
         if v < 0:
             raise ValueError("Delay must be a non-negative integer")
@@ -219,6 +229,7 @@ class ScheduleEntry(BaseModel):
 
         Raises:
             ValueError: If the repetitions is negative.
+
         """
         if v < 0:
             raise ValueError("Repetitions must be a non-negative integer")
@@ -236,6 +247,7 @@ class ScheduleEntry(BaseModel):
 
         Raises:
             ValueError: If interval is invalid for the given repetitions.
+
         """
         if self.repetitions > 0:
             if self.interval == 0:

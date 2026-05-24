@@ -1,5 +1,6 @@
 """Tests for the CLI module."""
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -87,6 +88,46 @@ def test_run_command_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "FILES" in result.output
+
+
+def test_cli_version() -> None:
+    """Test CLI --version flag."""
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert "scheduler-run version:" in result.output
+
+
+def test_cli_version_short() -> None:
+    """Test CLI -V short flag."""
+    result = runner.invoke(app, ["-V"])
+    assert result.exit_code == 0
+    assert "scheduler-run version:" in result.output
+
+
+def test_main_entry_point() -> None:
+    """Test that __main__.py can be imported and provides the app."""
+    from scheduler_run import __main__
+
+    assert hasattr(__main__, "app")
+
+
+def test_run_command_configures_logging_when_unconfigured() -> None:
+    """Test CLI configures logging when the root logger has no handlers."""
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    root.handlers.clear()
+    try:
+        with patch("scheduler_run.cli.Config") as mock_config_class:
+            mock_config_class.return_value = MagicMock()
+            with patch("scheduler_run.cli.Scheduler") as mock_scheduler_class:
+                mock_scheduler_class.return_value = MagicMock()
+                result = runner.invoke(app, [])
+        assert result.exit_code == 0
+        assert root.handlers
+    finally:
+        root.handlers.clear()
+        for handler in saved_handlers:
+            root.addHandler(handler)
 
 
 def test_run_command_allow_duplicates() -> None:

@@ -22,6 +22,7 @@ def convert_csv_to_yaml(csv_path: Path, yaml_path: Path) -> None:
     Args:
         csv_path: Path to the input CSV file.
         yaml_path: Path to the output YAML file.
+
     """
     logger.info(f"Reading CSV from {csv_path}")
 

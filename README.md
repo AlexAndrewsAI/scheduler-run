@@ -84,8 +84,14 @@ uv run scheduler-run schedule1.yaml schedule2.yaml
 # Allow duplicate schedule entries
 uv run scheduler-run --allow-duplicates schedule.yaml
 
+# Show version
+uv run scheduler-run --version
+
 # Show help
 uv run scheduler-run --help
+
+# Run as a module
+uv run python -m scheduler_run
 ```
 
 ### Testing with schedule.yaml
@@ -122,10 +128,10 @@ scheduler.run()
 ### Install Dev Dependencies
 
 ```bash
-uv sync
+uv sync --dev
 ```
 
-This installs all dependencies and dev tools (pytest, ruff, mypy).
+This installs all dependencies and dev tools (pytest, pytest-cov, ruff, mypy).
 
 ### Run Tests
 
@@ -143,32 +149,37 @@ uv run pytest -s
 ### Code Quality
 
 ```bash
-# Lint code
-uv run ruff check scheduler_run tests
+# Lint and format
+uv run ruff check .
+uv run ruff format .
 
 # Type check
-uv run mypy scheduler_run
+uv run mypy .
 ```
+
+Tests enforce at least 80% coverage on `scheduler_run` via pytest-cov.
 
 ## Project Structure
 
 ```
 scheduler-run/
-├── .gitignore
+├── .github/workflows/ci.yml
+├── AGENTS.md
+├── AGENTS_MANUAL_CHECKS.md
 ├── pyproject.toml
-├── README.md
 ├── scheduler_run/
 │   ├── __init__.py
+│   ├── __main__.py
 │   ├── cli.py
 │   ├── config.py
 │   └── scheduler.py
+├── scripts/
+│   └── convert_csv_to_yaml.py
 └── tests/
-    ├── __init__.py
     ├── test_cli.py
     ├── test_config.py
     ├── test_scheduler.py
     └── schedule.yaml
-
 ```
 
 ## Features

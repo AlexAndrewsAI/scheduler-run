@@ -4,9 +4,10 @@ import datetime
 import logging
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from scheduler_run.config import Config
@@ -47,6 +48,17 @@ def test_run_system_command_failure(caplog: pytest.LogCaptureFixture) -> None:
         mock_run.side_effect = subprocess.CalledProcessError(1, "false")
         scheduler._run_system_command("false")
         assert "Command failed: false" in caplog.text
+
+
+def test_run_system_command_not_found(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _run_system_command when the executable is not found."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.ERROR)
+
+    with patch("scheduler_run.scheduler.subprocess.run") as mock_run:
+        mock_run.side_effect = FileNotFoundError("No such file")
+        scheduler._run_system_command("nonexistent-cmd-xyz")
+        assert "Command not found: nonexistent-cmd-xyz" in caplog.text
 
 
 def test_schedule_command_system_type(caplog: pytest.LogCaptureFixture) -> None:
@@ -102,6 +114,82 @@ def test_load_schedule_success(
 
         assert f"Loading schedule from {yaml_file}" in caplog.text
         mock_every.assert_called()
+
+
+@pytest.mark.parametrize(
+    "yaml_content",
+    [
+        "",
+        "other_key: value\n",
+    ],
+    ids=["empty_file", "missing_schedules_key"],
+)
+def test_load_schedule_missing_schedules_key(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    yaml_content: str,
+) -> None:
+    """Test load_schedule when YAML has no schedules key."""
+    yaml_file = tmp_path / "no_schedules.yaml"
+    yaml_file.write_text(yaml_content)
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        with pytest.raises(ValueError, match="missing 'schedules' key"):
+            scheduler.load_schedule()
+
+        assert "Invalid YAML format" in caplog.text
+        assert mock_every.call_count == 0
+        assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_permission_denied(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule when the YAML file cannot be read."""
+    yaml_file = tmp_path / "protected.yaml"
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with (
+        patch(
+            "builtins.open",
+            mock_open(read_data="schedules: []\n"),
+        ) as mock_file,
+        patch("scheduler_run.scheduler.schedule.every") as mock_every,
+    ):
+        mock_file.side_effect = PermissionError("Permission denied")
+
+        with pytest.raises(PermissionError):
+            scheduler.load_schedule()
+
+        assert f"Permission denied reading YAML file: {yaml_file}" in caplog.text
+        assert mock_every.call_count == 0
+        assert len(scheduler.scheduled_commands) == 0
+
+
+def test_load_schedule_yaml_parse_error(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule when YAML parsing fails."""
+    yaml_file = tmp_path / "broken.yaml"
+    yaml_file.write_text("schedules:\n  - type: [\n")
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with patch("scheduler_run.scheduler.schedule.every") as mock_every:
+        with pytest.raises(yaml.YAMLError):
+            scheduler.load_schedule()
+
+        assert f"YAML parsing error in {yaml_file}" in caplog.text
+        assert mock_every.call_count == 0
+        assert len(scheduler.scheduled_commands) == 0
 
 
 def test_load_schedule_file_not_found(
@@ -797,8 +885,7 @@ def test_load_schedule_allow_duplicates(
 def test_load_schedule_different_fields_not_duplicates(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test that entries with same type/command/time but different
-    delay/repetitions/interval are NOT duplicates."""
+    """Test entries differing only in delay/repetitions/interval are not duplicates."""
     yaml_file = tmp_path / "different_fields.yaml"
     yaml_file.write_text(
         "schedules:\n"
@@ -845,8 +932,7 @@ def test_load_schedule_different_fields_not_duplicates(
 def test_load_schedule_clears_global_registry(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test that load_schedule clears the global schedule registry to prevent
-    duplicate jobs on reload."""
+    """Test load_schedule clears the global schedule registry on reload."""
     yaml_file = tmp_path / "test_schedule.yaml"
     yaml_file.write_text(
         "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
@@ -881,8 +967,7 @@ def test_load_schedule_clears_global_registry(
 
 
 def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
-    """Test that repetition timing uses base_time + (i * interval) + delay_i,
-    not interval after previous run."""
+    """Test repetition timing uses base_time + (i * interval) + per-run delay."""
     scheduler = Scheduler()
     caplog.set_level(logging.INFO)
 
@@ -925,8 +1010,7 @@ def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
 def test_load_schedule_multiple_files_second_missing(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with multiple files where second file is missing
-    after first loads."""
+    """Test load_schedule aborts when a later YAML file is missing."""
     yaml_file1 = tmp_path / "schedule1.yaml"
     yaml_file1.write_text(
         "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
@@ -975,7 +1059,7 @@ def test_load_schedule_non_dict_list_item(
         mock_at = MagicMock()
         mock_day.at.return_value = mock_at
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="expected dict"):
             scheduler.load_schedule()
 
         assert "Invalid entry" in caplog.text
@@ -1016,8 +1100,7 @@ def test_load_schedule_unsupported_type_explicit(
 def test_load_schedule_clears_schedule_actually(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test that load_schedule actually clears the schedule on reload
-    (not just mocked)."""
+    """Test load_schedule clears scheduled_commands on reload without mocks."""
     yaml_file = tmp_path / "test_schedule.yaml"
     yaml_file.write_text(
         "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
@@ -1085,8 +1168,7 @@ def test_load_schedule_interval_zero_with_repetitions(
 def test_load_schedule_interval_negative_with_repetitions(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule with negative interval (except -1) and
-    repetitions>0 raises ValidationError."""
+    """Test load_schedule rejects negative interval when repetitions > 0."""
     yaml_file = tmp_path / "invalid_interval_negative.yaml"
     yaml_file.write_text(
         "schedules:\n"

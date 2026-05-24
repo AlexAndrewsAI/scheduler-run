@@ -8,6 +8,7 @@ from pathlib import Path
 
 import typer
 
+from scheduler_run import __version__
 from scheduler_run.config import Config
 from scheduler_run.scheduler import Scheduler
 
@@ -17,9 +18,16 @@ app = typer.Typer(
 )
 
 
+def version_callback(value: bool) -> None:
+    """Handle the version flag callback."""
+    if value:
+        typer.echo(f"scheduler-run version: {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
 def main(
-    files: list[Path] = typer.Argument(
+    files: list[Path] | None = typer.Argument(
         None,
         help="Path(s) to YAML file(s) containing scheduled commands "
         "(default: schedule.yaml)",
@@ -28,6 +36,14 @@ def main(
         False,
         "--allow-duplicates",
         help="Allow duplicate schedule entries",
+    ),
+    version: bool | None = typer.Option(
+        None,
+        "--version",
+        "-V",
+        callback=version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
     ),
 ) -> None:
     """Run the scheduler with commands from YAML file(s).
@@ -42,7 +58,10 @@ def main(
 
     Args:
         files: List of paths to YAML files containing scheduled commands.
-               If not provided, defaults to schedule.yaml in the current directory.
+            If not provided, defaults to schedule.yaml in the current directory.
+        allow_duplicates: When True, duplicate schedule entries are scheduled twice.
+        version: Eager flag handled by version_callback; not used in the body.
+
     """
     # Configure logging to display messages only if not already configured
     if not logging.getLogger().handlers:
