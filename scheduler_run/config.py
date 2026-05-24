@@ -4,6 +4,7 @@ Provides configuration management using Pydantic models.
 """
 
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ class Config(BaseModel):
 
     """
 
-    yaml_path: str | Path | list[Path | str] = Field(
+    yaml_path: str | Path | Sequence[Path | str] = Field(
         default_factory=lambda: [Path("schedule.yaml")],
         description="Path(s) to the YAML file(s) containing scheduled commands",
     )
