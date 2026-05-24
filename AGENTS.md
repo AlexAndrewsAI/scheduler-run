@@ -1,42 +1,64 @@
-# Agent Instructions: scheduler-run
+# Agent Instructions: scheduler-run (Token-Efficient)
 
-> **Meta-Directive:** As an agent, you are responsible for keeping this file accurate. If you add dependencies, change the project structure, or update the tech stack, you MUST update this file to reflect those changes.
-
-This project is a scheduler that runs commands from a YAML file, built with modern Python practices: `uv` for management, `pydantic` for validation, `typer` for CLI, and `schedule` for task scheduling.
+## Quick Start
+1. **Setup:** Run `uv sync --dev` before major work sessions
+2. **Activate:** Ensure `.venv` is active; run `uv venv` if missing
+3. **Code:** Use `python3` or `uv run python`; always add type hints and tests
 
 ## Tech Stack
-- **Environment/Deps:** [uv](https://github.com/astral-sh/uv)
-- **Validation:** [pydantic](https://docs.pydantic.dev/)
-- **CLI:** [typer](https://typer.tiangolo.com/)
-- **Scheduling:** [schedule](https://schedule.readthedocs.io/)
-- **Testing:** [pytest](https://docs.pytest.org/)
-- **Linting/Formatting:** [ruff](https://beta.ruff.rs/)
-- **Type Checking:** [mypy](https://mypy.readthedocs.io/)
-
-## Core Directives
-- **Self-Maintenance:** If you modify `pyproject.toml`, the project architecture, or core logic (e.g., renaming `scheduler.py`), immediately update the "Tech Stack", "Workflow Commands", and "Project Structure" sections of this file.
-- **Virtual Env:** ALWAYS use the `.venv` directory. Run `uv venv` if it's missing.
-- **Python Invocation:** Prefer `python3` or `uv run python`.
-- **Pathing:** NEVER use absolute paths. Always use relative paths from the repository root.
-- **Isolation:** Do not access files outside the repository parent (`./..`) without explicit permission.
-- **Interactivity:** Avoid commands that trigger interactive terminal prompts (e.g., `borg`, `keepass`). For testing, ensure these are mocked or bypassed.
-- **Syncing:** Ensure the environment is synced before major operations: `uv sync --dev`.
-- **Type Safety:** ALWAYS provide type hints for all function signatures and class members. The project is strictly type-checked with `mypy`.
-- **Logging:** NEVER use `print()` for status or debugging. Use the standard `logging` library.
-- **Dependencies:** Use `uv add <package>` or `uv remove <package>` to manage dependencies. Do NOT edit `pyproject.toml` manually unless fixing configuration.
-- **Testing:** EVERY code change or new feature MUST include corresponding tests in the `tests/` directory. DO NOT RUN pytest, mypy, or ruff check yourself. The user will do this and update you on results.
-- **Git Commits:** NEVER stage or commit changes unless explicitly requested by the user.
-- **Code Reviews:** When asked to perform a code review, do NOT modify any code. Focus strictly on analysis and recording findings in `./REVIEW.md`.
-- **Documentation:** Use Google-style docstrings for all public modules, classes, and functions.
-
-## Workflow Commands
-- **Setup:** `uv sync --dev`
-- **CLI Dev:** `uv run scheduler-run` (Update this if the package name or CLI entry point changes)
+| Component | Tool |
+|-----------|------|
+| Environment & Dependencies | uv |
+| Data Validation | Pydantic |
+| CLI Framework | Typer |
+| Task Scheduling | schedule |
+| Testing | pytest |
+| Linting & Formatting | ruff |
+| Type Checking | mypy |
 
 ## Project Structure
-- `scheduler_run/`: Core logic.
-    - `config.py`: Pydantic models for configuration (Config, ScheduleEntry with fields: type, command, time, delay, repetitions, interval).
-    - `scheduler.py`: Core scheduling logic.
-    - `cli.py`: Typer-based CLI entry point.
-- `tests/`: Pytest suite.
-- `pyproject.toml`: Dependency and tool configuration.
+```
+scheduler_run/
+  ├── config.py          (Pydantic models: Config, ScheduleEntry)
+  ├── scheduler.py       (Core scheduling logic)
+  └── cli.py             (Typer CLI)
+tests/                   (Pytest suite)
+scripts/                 (Utility scripts, e.g. CSV conversion)
+pyproject.toml           (Dependencies & tool config)
+```
+
+## Essential Directives
+
+### Code Standards
+- **Type Hints:** Required on ALL function signatures and class members. Write code that will pass mypy.
+- **Docstrings:** Google-style format for all public APIs.
+- **Logging:** Use `logging` module only; never `print()`.
+- **Relative Paths:** Never use absolute paths in code.
+
+### Dependency & Configuration Management
+- **Adding/Removing Dependencies:** Use `uv add` / `uv remove` commands.
+- **Editing pyproject.toml:** Avoid manual edits during development. Only update `pyproject.toml` as the **final change** after all work is tested and finalized.
+- **Before Major Work:** Always run `uv sync --dev` first.
+
+### Testing & Quality
+- **Test Coverage:** Every code change requires corresponding tests in `tests/`.
+- **Manual Validation:** After development is complete, **you will manually run** the full validation suite for final checks.
+
+### Operational Constraints
+- **No Interactive Prompts:** Mock or bypass any interactive commands.
+- **No Git Operations:** Don't stage/commit unless explicitly requested.
+- **Code Review Mode:** Analyze only; record findings in `./REVIEW.md` without making modifications. At the top of the review, identify the reviewer including the name of the IDE/CLI used and the primary model that performed the review.
+
+### File Maintenance
+- **Keep Instructions Current:** Update "Tech Stack," "Project Structure," and "Workflow Commands" if `pyproject.toml`, structure, or core logic changes.
+
+## Workflow Commands (Run Manually)
+```bash
+uv sync --dev                           # Install/sync all dependencies
+uv run pytest                           # Run tests (USER RUNS)
+uv run ruff check .                     # Lint (USER RUNS)
+uv run ruff format .                    # Auto-format (USER RUNS)
+uv run mypy .                           # Type check (USER RUNS)
+uv run scheduler-run                    # Test CLI
+uv run scheduler-run --version          # Show version
+```

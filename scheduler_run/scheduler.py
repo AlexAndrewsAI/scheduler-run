@@ -10,12 +10,35 @@ import random
 import shlex
 import subprocess
 import time
+from typing import NamedTuple
 
 import schedule
 import yaml
 from pydantic import ValidationError
 
 from scheduler_run.config import Config, ScheduleEntry
+
+logger = logging.getLogger(__name__)
+
+# Constants for delay randomization
+DELAY_SIGMA_MULTIPLIER = 0.15  # 15% standard deviation for delay randomization
+
+
+class ScheduledCommand(NamedTuple):
+    """A scheduled command with its execution details.
+
+    Attributes:
+        command_type: The type of command (e.g., "system").
+        command: The command to execute.
+        time: The scheduled execution time in HH:MM:SS format.
+        delay: The calculated random delay in seconds.
+
+    """
+
+    command_type: str
+    command: str
+    time: str
+    delay: int
 
 
 class Scheduler:
@@ -27,32 +50,34 @@ class Scheduler:
     Currently only type "system" is supported.
     """
 
-    def __init__(self, config: Config | None = None):
+    def __init__(self, config: Config | None = None) -> None:
         """Initialize the Scheduler instance.
 
         Args:
             config: Optional configuration object. If not provided,
                    a default Config instance will be created.
+
         """
         if config is None:
             config = Config()
         self.config = config
-        self.scheduled_commands: list[tuple[str, str, str, int]] = []
+        self.scheduled_commands: list[ScheduledCommand] = []
 
     def _run_system_command(self, command: str) -> None:
         """Run a system command.
 
         Args:
             command: The command to execute.
+
         """
-        logging.info(f"Running system command: {command}")
+        logger.info("Running system command: %s", command)
         try:
             args = shlex.split(command)
-            subprocess.run(args, check=True)
+            subprocess.run(args, check=True)  # noqa: S603
         except FileNotFoundError as e:
-            logging.error(f"Command not found: {command}. Error: {e}")
+            logger.error("Command not found: %s. Error: %s", command, e)
         except subprocess.CalledProcessError as e:
-            logging.error(f"Command failed: {command}. Error: {e}")
+            logger.error("Command failed: %s. Error: %s", command, e)
 
     def _calculate_actual_time(self, time_str: str, delay_seconds: int) -> str:
         """Calculate the actual start time including the random delay.
@@ -63,6 +88,7 @@ class Scheduler:
 
         Returns:
             The actual time in HH:MM:SS format.
+
         """
         parts = time_str.split(":")
         hours = int(parts[0])
@@ -88,6 +114,7 @@ class Scheduler:
 
         Returns:
             The next execution datetime as a string in YYYY-MM-DD HH:MM:SS format.
+
         """
         if now is None:
             now = datetime.datetime.now()
@@ -126,14 +153,17 @@ class Scheduler:
                 (only used when repetitions > 0). If -1 and repetitions > 0,
                 the interval is auto-calculated to spread runs evenly
                 throughout the day.
+
         """
         if command_type == "system":
             # Auto-calculate interval if -1 and repetitions > 0
             if interval == -1 and repetitions > 0:
                 interval = (24 * 3600) // (repetitions + 1)
-                logging.info(
-                    f"Auto-calculated interval: {interval}s to spread "
-                    f"{repetitions + 1} executions evenly throughout the day"
+                logger.info(
+                    "Auto-calculated interval: %ss to spread %s executions "
+                    "evenly throughout the day",
+                    interval,
+                    repetitions + 1,
                 )
 
             # Calculate the number of executions (1 + repetitions)
@@ -143,7 +173,10 @@ class Scheduler:
                 # Recalculate delay for each repetition
                 if delay > 0:
                     actual_delay = max(
-                        0, int(random.gauss(mu=delay, sigma=0.15 * delay))
+                        0,
+                        int(
+                            random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
+                        ),
                     )
                 else:
                     actual_delay = 0
@@ -162,18 +195,23 @@ class Scheduler:
                     m = (total_seconds % 3600) // 60
                     base_time_str = f"{h:02d}:{m:02d}"
 
+                # Calculate actual time with delay
                 actual_time = self._calculate_actual_time(base_time_str, actual_delay)
 
                 schedule.every().day.at(actual_time).do(
                     self._run_system_command, command
                 )
                 self.scheduled_commands.append(
-                    (command_type, command, actual_time, actual_delay)
+                    ScheduledCommand(command_type, command, actual_time, actual_delay)
                 )
-                logging.info(
-                    f"Scheduled system command '{command}' "
-                    f"(execution {i + 1}/{num_executions}) at {actual_time} "
-                    f"with calculated delay {actual_delay}s"
+                logger.info(
+                    "Scheduled system command '%s' (execution %s/%s) at %s "
+                    "with calculated delay %ss",
+                    command,
+                    i + 1,
+                    num_executions,
+                    actual_time,
+                    actual_delay,
                 )
         else:
             raise ValueError(
@@ -195,24 +233,24 @@ class Scheduler:
         scheduled commands.
         """
         yaml_paths = self.config.yaml_paths
-        logging.info(f"Loading schedule from {len(yaml_paths)} YAML file(s)")
+        logger.info("Loading schedule from %s YAML file(s)", len(yaml_paths))
 
         # Phase 1: Load and validate all YAML files
         all_entries: list[ScheduleEntry] = []
         seen_entries: set[tuple[str, str, str, int, int, int]] = set()
 
         for yaml_path in yaml_paths:
-            logging.info(f"Loading schedule from {yaml_path}")
+            logger.info("Loading schedule from %s", yaml_path)
 
             try:
-                with open(yaml_path) as yamlfile:
+                with open(yaml_path, encoding="utf-8") as yamlfile:
                     data = yaml.safe_load(yamlfile)
                     if not data or "schedules" not in data:
                         error_msg = (
                             f"Invalid YAML format in {yaml_path}: "
                             "missing 'schedules' key"
                         )
-                        logging.error(error_msg)
+                        logger.error("%s", error_msg)
                         raise ValueError(error_msg)
 
                     for entry_data in data["schedules"]:
@@ -222,7 +260,7 @@ class Scheduler:
                                     f"Invalid entry in {yaml_path}: expected dict, "
                                     f"got {type(entry_data).__name__}: {entry_data}"
                                 )
-                                logging.error(error_msg)
+                                logger.error("%s", error_msg)
                                 raise ValueError(error_msg)
                             entry = ScheduleEntry(**entry_data)
                             entry_key = (
@@ -235,25 +273,33 @@ class Scheduler:
                             )
                             if entry_key in seen_entries:
                                 if self.config.allow_duplicates:
-                                    logging.info(
-                                        f"Allowing duplicate entry in {yaml_path}: "
-                                        f"type='{entry.type}', "
-                                        f"command='{entry.command}', "
-                                        f"time='{entry.time}', delay={entry.delay}, "
-                                        f"repetitions={entry.repetitions}, "
-                                        f"interval={entry.interval}"
+                                    logger.info(
+                                        "Allowing duplicate entry in %s: "
+                                        "type='%s', command='%s', time='%s', "
+                                        "delay=%s, repetitions=%s, interval=%s",
+                                        yaml_path,
+                                        entry.type,
+                                        entry.command,
+                                        entry.time,
+                                        entry.delay,
+                                        entry.repetitions,
+                                        entry.interval,
                                     )
                                     all_entries.append(entry)
                                 else:
-                                    logging.warning(
-                                        f"Duplicate entry detected in {yaml_path}: "
-                                        f"type='{entry.type}', "
-                                        f"command='{entry.command}', "
-                                        f"time='{entry.time}', delay={entry.delay}, "
-                                        f"repetitions={entry.repetitions}, "
-                                        f"interval={entry.interval}. "
+                                    logger.warning(
+                                        "Duplicate entry detected in %s: "
+                                        "type='%s', command='%s', time='%s', "
+                                        "delay=%s, repetitions=%s, interval=%s. "
                                         "Use allow_duplicates=True or "
-                                        "--allow-duplicates to permit."
+                                        "--allow-duplicates to permit.",
+                                        yaml_path,
+                                        entry.type,
+                                        entry.command,
+                                        entry.time,
+                                        entry.delay,
+                                        entry.repetitions,
+                                        entry.interval,
                                     )
                             else:
                                 seen_entries.add(entry_key)
@@ -263,19 +309,19 @@ class Scheduler:
                                 f"Invalid entry in {yaml_path}: {entry_data}. "
                                 f"Error: {e}"
                             )
-                            logging.error(error_msg)
+                            logger.error("%s", error_msg)
                             raise
             except FileNotFoundError:
-                logging.error(f"YAML file not found: {yaml_path}")
+                logger.error("YAML file not found: %s", yaml_path)
                 raise
             except PermissionError:
-                logging.error(f"Permission denied reading YAML file: {yaml_path}")
+                logger.error("Permission denied reading YAML file: %s", yaml_path)
                 raise
             except yaml.YAMLError as e:
-                logging.error(f"YAML parsing error in {yaml_path}: {e}")
+                logger.error("YAML parsing error in %s: %s", yaml_path, e)
                 raise
             except (KeyError, ValueError) as e:
-                logging.error(f"Invalid YAML data in {yaml_path}: {e}")
+                logger.error("Invalid YAML data in %s: %s", yaml_path, e)
                 raise
 
         # Phase 2: Clear and schedule all validated entries
@@ -293,10 +339,16 @@ class Scheduler:
             )
 
         # Log all scheduled commands
-        logging.info("Scheduled commands:")
-        for command_type, command, time_str, delay in self.scheduled_commands:
-            next_run = self._calculate_next_run(time_str)
-            logging.info(f"{command_type} • {command} • {next_run} • delay: {delay}s")
+        logger.info("Scheduled commands:")
+        for cmd in self.scheduled_commands:
+            next_run = self._calculate_next_run(cmd.time)
+            logger.info(
+                "%s • %s • %s • delay: %ss",
+                cmd.command_type,
+                cmd.command,
+                next_run,
+                cmd.delay,
+            )
 
     def run(self) -> None:
         """Run the scheduler.
@@ -306,10 +358,10 @@ class Scheduler:
         """
         self.load_schedule()
 
-        logging.info("Scheduler started. Press Ctrl+C to stop.")
+        logger.info("Scheduler started. Press Ctrl+C to stop.")
         try:
             while True:
                 schedule.run_pending()
                 time.sleep(1)
         except KeyboardInterrupt:
-            logging.info("Scheduler stopped by user")
+            logger.info("Scheduler stopped by user")
