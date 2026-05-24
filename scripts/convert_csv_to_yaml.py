@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert CSV schedule file to YAML format.
 
-This script converts a CSV file with columns: type, command, time
+This script converts a CSV file with columns: type, command, time, delay, repetitions, interval
 to a YAML file with the equivalent structure.
 """
 
@@ -37,6 +37,32 @@ def convert_csv_to_yaml(csv_path: Path, yaml_path: Path) -> None:
                     "command": row.get("command", "").strip(),
                     "time": row.get("time", "").strip(),
                 }
+                
+                # Handle optional fields with defaults
+                delay_str = row.get("delay", "").strip()
+                if delay_str:
+                    try:
+                        entry["delay"] = int(delay_str)
+                    except ValueError:
+                        logger.warning(f"Invalid delay value '{delay_str}', using default 0")
+                        entry["delay"] = 0
+                
+                repetitions_str = row.get("repetitions", "").strip()
+                if repetitions_str:
+                    try:
+                        entry["repetitions"] = int(repetitions_str)
+                    except ValueError:
+                        logger.warning(f"Invalid repetitions value '{repetitions_str}', using default 0")
+                        entry["repetitions"] = 0
+                
+                interval_str = row.get("interval", "").strip()
+                if interval_str:
+                    try:
+                        entry["interval"] = int(interval_str)
+                    except ValueError:
+                        logger.warning(f"Invalid interval value '{interval_str}', using default -1")
+                        entry["interval"] = -1
+                
                 if entry["type"] and entry["command"] and entry["time"]:
                     schedules.append(entry)
                 else:
