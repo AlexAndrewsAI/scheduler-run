@@ -15,7 +15,7 @@ This is a command scheduler that reads commands from a YAML file and executes th
 - Dependency management with **uv**
 - Command scheduling with the **schedule** library
 
-The scheduler reads a YAML file with entries containing: `type`, `command`, and `time`, and runs each command daily at the specified time.
+The scheduler reads a YAML file with entries containing: `type`, `command`, and `time`, and runs each command daily at the specified time. Scheduled commands run in parallel as background processes; when you stop the scheduler (Ctrl+C), any still-running commands are terminated.
 
 ## Installation
 
@@ -102,7 +102,7 @@ To test the scheduler with the example schedule.yaml file:
 uv run scheduler-run tests/schedule.yaml
 ```
 
-The scheduler will load the commands from the YAML file and run them at the specified times. Press Ctrl+C to stop the scheduler.
+The scheduler will load the commands from the YAML file and run them at the specified times. Commands that overlap in time run in parallel. Press Ctrl+C to stop the scheduler; any commands still running are terminated.
 
 ### Python API
 
@@ -189,6 +189,8 @@ scheduler-run/
 - **Testing**: Comprehensive test suite with pytest
 - **Code quality**: Automated linting with ruff and type checking with mypy
 - **Flexible scheduling**: Uses the schedule library for reliable task execution
+- **Parallel execution**: Overlapping scheduled commands run concurrently as subprocesses
+- **Clean shutdown**: Stopping the scheduler terminates any child processes still running
 
 ## Security Considerations
 

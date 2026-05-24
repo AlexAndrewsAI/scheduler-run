@@ -10,6 +10,7 @@ import random
 import shlex
 import subprocess
 import time
+from collections.abc import Sequence
 from typing import NamedTuple
 
 import schedule
@@ -47,6 +48,8 @@ class Scheduler:
     Reads a YAML file with a list of schedule entries, each containing:
     type, command, and time fields.
     Schedules each command to run daily at the specified time.
+    Commands run in parallel as background subprocesses; stopping the
+    scheduler (for example with Ctrl+C) terminates any still-running children.
     Currently only type "system" is supported.
     """
 
@@ -62,22 +65,88 @@ class Scheduler:
             config = Config()
         self.config = config
         self.scheduled_commands: list[ScheduledCommand] = []
+        self._running_processes: list[subprocess.Popen[bytes]] = []
+
+    def _reap_finished_processes(self) -> None:
+        """Remove finished child processes and log their exit status."""
+        still_running: list[subprocess.Popen[bytes]] = []
+        for process in self._running_processes:
+            return_code = process.poll()
+            if return_code is None:
+                still_running.append(process)
+                continue
+            command = self._process_command(process)
+            if return_code == 0:
+                logger.info("Command completed: %s (exit %s)", command, return_code)
+            else:
+                logger.error("Command failed: %s (exit %s)", command, return_code)
+        self._running_processes = still_running
+
+    @staticmethod
+    def _process_command(process: subprocess.Popen[bytes]) -> str:
+        """Return a human-readable command string for a tracked process."""
+        args = process.args
+        if args is None:
+            return "<unknown>"
+        if isinstance(args, str):
+            return args
+        if isinstance(args, (bytes, bytearray)):
+            return args.decode(errors="replace")
+        if isinstance(args, Sequence):
+            return " ".join(str(part) for part in args)
+        return str(args)
+
+    def _terminate_running_processes(self) -> None:
+        """Terminate all child processes started by this scheduler."""
+        if not self._running_processes:
+            return
+
+        logger.info("Terminating %s running process(es)", len(self._running_processes))
+        for process in self._running_processes:
+            if process.poll() is not None:
+                continue
+            command = self._process_command(process)
+            logger.info("Terminating process: %s", command)
+            process.terminate()
+
+        deadline = time.monotonic() + 5.0
+        for process in self._running_processes:
+            if process.poll() is not None:
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                command = self._process_command(process)
+                logger.warning("Killing process: %s", command)
+                process.kill()
+                process.wait()
+
+        self._running_processes.clear()
 
     def _run_system_command(self, command: str) -> None:
-        """Run a system command.
+        """Start a system command in a background subprocess.
+
+        Commands run in parallel; the scheduler does not wait for completion
+        before running other scheduled tasks.
 
         Args:
             command: The command to execute.
 
         """
-        logger.info("Running system command: %s", command)
+        logger.info("Starting system command: %s", command)
         try:
             args = shlex.split(command)
-            subprocess.run(args, check=True)  # noqa: S603
+            process = subprocess.Popen(  # noqa: S603
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         except FileNotFoundError as e:
             logger.error("Command not found: %s. Error: %s", command, e)
-        except subprocess.CalledProcessError as e:
-            logger.error("Command failed: %s. Error: %s", command, e)
+            return
+
+        self._running_processes.append(process)
 
     def _calculate_actual_time(self, time_str: str, delay_seconds: int) -> str:
         """Calculate the actual start time including the random delay.
@@ -362,6 +431,9 @@ class Scheduler:
         try:
             while True:
                 schedule.run_pending()
+                self._reap_finished_processes()
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("Scheduler stopped by user")
+        finally:
+            self._terminate_running_processes()

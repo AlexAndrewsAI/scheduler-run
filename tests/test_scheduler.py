@@ -29,25 +29,66 @@ def test_scheduler_init_custom_config() -> None:
 
 
 def test_run_system_command_success(caplog: pytest.LogCaptureFixture) -> None:
-    """Test _run_system_command with a successful command."""
+    """Test _run_system_command starts a background subprocess."""
     scheduler = Scheduler()
     caplog.set_level(logging.INFO)
 
-    with patch("scheduler_run.scheduler.subprocess.run") as mock_run:
+    mock_process = MagicMock(spec=subprocess.Popen)
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = mock_process
         scheduler._run_system_command("echo 'test'")
-        mock_run.assert_called_once_with(["echo", "test"], check=True)
-        assert "Running system command: echo 'test'" in caplog.text
+        mock_popen.assert_called_once_with(
+            ["echo", "test"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        assert scheduler._running_processes == [mock_process]
+        assert "Starting system command: echo 'test'" in caplog.text
 
 
-def test_run_system_command_failure(caplog: pytest.LogCaptureFixture) -> None:
-    """Test _run_system_command with a failed command."""
+def test_reap_finished_processes_success(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _reap_finished_processes logs success for exit code 0."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = 0
+    mock_process.args = ["echo", "test"]
+    scheduler._running_processes = [mock_process]
+
+    scheduler._reap_finished_processes()
+
+    assert scheduler._running_processes == []
+    assert "Command completed: echo test (exit 0)" in caplog.text
+
+
+def test_reap_finished_processes_failure(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _reap_finished_processes logs failure for non-zero exit."""
     scheduler = Scheduler()
     caplog.set_level(logging.ERROR)
 
-    with patch("scheduler_run.scheduler.subprocess.run") as mock_run:
-        mock_run.side_effect = subprocess.CalledProcessError(1, "false")
-        scheduler._run_system_command("false")
-        assert "Command failed: false" in caplog.text
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = 1
+    mock_process.args = ["false"]
+    scheduler._running_processes = [mock_process]
+
+    scheduler._reap_finished_processes()
+
+    assert scheduler._running_processes == []
+    assert "Command failed: false (exit 1)" in caplog.text
+
+
+def test_reap_finished_processes_keeps_running() -> None:
+    """Test _reap_finished_processes keeps processes that are still running."""
+    scheduler = Scheduler()
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = None
+    scheduler._running_processes = [mock_process]
+
+    scheduler._reap_finished_processes()
+
+    assert scheduler._running_processes == [mock_process]
 
 
 def test_run_system_command_not_found(caplog: pytest.LogCaptureFixture) -> None:
@@ -55,10 +96,53 @@ def test_run_system_command_not_found(caplog: pytest.LogCaptureFixture) -> None:
     scheduler = Scheduler()
     caplog.set_level(logging.ERROR)
 
-    with patch("scheduler_run.scheduler.subprocess.run") as mock_run:
-        mock_run.side_effect = FileNotFoundError("No such file")
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.side_effect = FileNotFoundError("No such file")
         scheduler._run_system_command("nonexistent-cmd-xyz")
+        assert scheduler._running_processes == []
         assert "Command not found: nonexistent-cmd-xyz" in caplog.text
+
+
+def test_terminate_running_processes(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _terminate_running_processes terminates active children."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    running = MagicMock(spec=subprocess.Popen)
+    running.poll.return_value = None
+    running.args = ["sleep", "60"]
+    finished = MagicMock(spec=subprocess.Popen)
+    finished.poll.return_value = 0
+    finished.args = ["true"]
+    scheduler._running_processes = [running, finished]
+
+    scheduler._terminate_running_processes()
+
+    running.terminate.assert_called_once()
+    finished.terminate.assert_not_called()
+    running.wait.assert_called()
+    assert scheduler._running_processes == []
+    assert "Terminating 2 running process(es)" in caplog.text
+    assert "Terminating process: sleep 60" in caplog.text
+
+
+def test_terminate_running_processes_kills_on_timeout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _terminate_running_processes kills children that ignore SIGTERM."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.WARNING)
+
+    stubborn = MagicMock(spec=subprocess.Popen)
+    stubborn.poll.return_value = None
+    stubborn.args = ["sleep", "60"]
+    stubborn.wait.side_effect = [subprocess.TimeoutExpired("sleep", 5), None]
+    scheduler._running_processes = [stubborn]
+
+    scheduler._terminate_running_processes()
+
+    stubborn.kill.assert_called_once()
+    assert "Killing process: sleep 60" in caplog.text
 
 
 def test_schedule_command_system_type(caplog: pytest.LogCaptureFixture) -> None:
@@ -303,6 +387,7 @@ def test_scheduler_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None
         with (
             patch("scheduler_run.scheduler.schedule.run_pending"),
             patch("scheduler_run.scheduler.time.sleep") as mock_sleep,
+            patch.object(scheduler, "_terminate_running_processes") as mock_terminate,
         ):
             # Make sleep raise KeyboardInterrupt to exit the loop
             mock_sleep.side_effect = KeyboardInterrupt()
@@ -312,6 +397,7 @@ def test_scheduler_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None
             assert "Loading schedule from" in caplog.text
             assert "Scheduler started" in caplog.text
             assert "Scheduler stopped by user" in caplog.text
+            mock_terminate.assert_called_once()
 
 
 def test_load_schedule_empty_list(
@@ -876,6 +962,55 @@ def test_load_schedule_allow_duplicates(
         # Verify all entries were scheduled (3 entries including duplicates)
         assert mock_every.call_count == 3
         assert len(scheduler.scheduled_commands) == 3
+
+
+def test_process_command_none_args() -> None:
+    """Test _process_command when process.args is None."""
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.args = None
+    result = Scheduler._process_command(mock_process)
+    assert result == "<unknown>"
+
+
+def test_process_command_string_args() -> None:
+    """Test _process_command when args is a string."""
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.args = "echo test"
+    result = Scheduler._process_command(mock_process)
+    assert result == "echo test"
+
+
+def test_process_command_bytes_args() -> None:
+    """Test _process_command when args is bytes."""
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.args = b"echo test"
+    result = Scheduler._process_command(mock_process)
+    assert result == "echo test"
+
+
+def test_process_command_bytearray_args() -> None:
+    """Test _process_command when args is bytearray."""
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.args = bytearray(b"echo test")
+    result = Scheduler._process_command(mock_process)
+    assert result == "echo test"
+
+
+def test_process_command_fallback() -> None:
+    """Test _process_command fallback case for unknown args type."""
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.args = 12345  # Not None, str, bytes, bytearray, or Sequence
+    result = Scheduler._process_command(mock_process)
+    assert result == "12345"
+
+
+def test_terminate_running_processes_empty() -> None:
+    """Test _terminate_running_processes when no processes are running."""
+    scheduler = Scheduler()
+    scheduler._running_processes = []
+    # Should return early without errors
+    scheduler._terminate_running_processes()
+    assert scheduler._running_processes == []
 
 
 def test_load_schedule_different_fields_not_duplicates(
