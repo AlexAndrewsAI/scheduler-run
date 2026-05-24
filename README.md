@@ -165,7 +165,6 @@ Tests enforce at least 80% coverage on `scheduler_run` via pytest-cov.
 scheduler-run/
 ├── .github/workflows/ci.yml
 ├── AGENTS.md
-├── AGENTS_MANUAL_CHECKS.md
 ├── pyproject.toml
 ├── scheduler_run/
 │   ├── __init__.py
@@ -190,6 +189,17 @@ scheduler-run/
 - **Testing**: Comprehensive test suite with pytest
 - **Code quality**: Automated linting with ruff and type checking with mypy
 - **Flexible scheduling**: Uses the schedule library for reliable task execution
+
+## Security Considerations
+
+**Important:** This scheduler executes commands defined in YAML files. Please ensure:
+
+- YAML files are from trusted sources
+- YAML files have appropriate file permissions (e.g., `600` for sensitive schedules)
+- Commands in YAML files are reviewed before deployment
+- The scheduler runs with the minimum necessary system privileges
+
+The scheduler uses `shell=False` for subprocess execution, which provides some protection against shell injection, but arbitrary commands can still be executed based on YAML file contents.
 
 ## Disclaimer
 

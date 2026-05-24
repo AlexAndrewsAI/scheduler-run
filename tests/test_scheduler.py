@@ -425,12 +425,10 @@ def test_schedule_command_with_delay(caplog: pytest.LogCaptureFixture) -> None:
         mock_at.do.assert_called_once_with(scheduler._run_system_command, "echo 'test'")
 
         assert len(scheduler.scheduled_commands) == 1
-        assert scheduler.scheduled_commands[0] == (
-            "system",
-            "echo 'test'",
-            "14:30:12",
-            12,
-        )
+        assert scheduler.scheduled_commands[0].command_type == "system"
+        assert scheduler.scheduled_commands[0].command == "echo 'test'"
+        assert scheduler.scheduled_commands[0].time == "14:30:12"
+        assert scheduler.scheduled_commands[0].delay == 12
         expected_msg = (
             "Scheduled system command 'echo 'test'' (execution 1/1) "
             "at 14:30:12 with calculated delay 12s"
@@ -465,12 +463,10 @@ def test_load_schedule_with_delay(tmp_path: Path) -> None:
         scheduler.load_schedule()
 
         assert len(scheduler.scheduled_commands) == 1
-        assert scheduler.scheduled_commands[0] == (
-            "system",
-            "echo 'hello'",
-            "14:10:45",
-            45,
-        )
+        assert scheduler.scheduled_commands[0].command_type == "system"
+        assert scheduler.scheduled_commands[0].command == "echo 'hello'"
+        assert scheduler.scheduled_commands[0].time == "14:10:45"
+        assert scheduler.scheduled_commands[0].delay == 45
 
 
 def test_calculate_actual_time() -> None:
@@ -696,7 +692,7 @@ def test_schedule_command_auto_calculate_interval(
 
         # Verify the scheduled times are spaced 6 hours apart
         # 00:00, 06:00, 12:00, 18:00
-        scheduled_times = [cmd[2] for cmd in scheduler.scheduled_commands]
+        scheduled_times = [cmd.time for cmd in scheduler.scheduled_commands]
         assert "00:00:00" in scheduled_times
         assert "06:00:00" in scheduled_times
         assert "12:00:00" in scheduled_times
@@ -736,7 +732,7 @@ def test_schedule_command_auto_calculate_interval_with_delay(
 
         # Verify the scheduled times include the delay
         # 00:00:30, 12:00:30
-        scheduled_times = [cmd[2] for cmd in scheduler.scheduled_commands]
+        scheduled_times = [cmd.time for cmd in scheduler.scheduled_commands]
         assert "00:00:30" in scheduled_times
         assert "12:00:30" in scheduled_times
 
@@ -997,13 +993,13 @@ def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
         assert len(scheduler.scheduled_commands) == 3
 
         # Verify the scheduled times match expected timing
-        scheduled_times = [cmd[2] for cmd in scheduler.scheduled_commands]
+        scheduled_times = [cmd.time for cmd in scheduler.scheduled_commands]
         assert "10:00:10" in scheduled_times
         assert "11:00:20" in scheduled_times
         assert "12:00:30" in scheduled_times
 
         # Verify delays were recalculated for each execution
-        delays = [cmd[3] for cmd in scheduler.scheduled_commands]
+        delays = [cmd.delay for cmd in scheduler.scheduled_commands]
         assert delays == [10, 20, 30]
 
 

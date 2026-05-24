@@ -10,6 +10,7 @@ import random
 import shlex
 import subprocess
 import time
+from typing import NamedTuple
 
 import schedule
 import yaml
@@ -18,6 +19,26 @@ from pydantic import ValidationError
 from scheduler_run.config import Config, ScheduleEntry
 
 logger = logging.getLogger(__name__)
+
+# Constants for delay randomization
+DELAY_SIGMA_MULTIPLIER = 0.15  # 15% standard deviation for delay randomization
+
+
+class ScheduledCommand(NamedTuple):
+    """A scheduled command with its execution details.
+
+    Attributes:
+        command_type: The type of command (e.g., "system").
+        command: The command to execute.
+        time: The scheduled execution time in HH:MM:SS format.
+        delay: The calculated random delay in seconds.
+
+    """
+
+    command_type: str
+    command: str
+    time: str
+    delay: int
 
 
 class Scheduler:
@@ -40,7 +61,7 @@ class Scheduler:
         if config is None:
             config = Config()
         self.config = config
-        self.scheduled_commands: list[tuple[str, str, str, int]] = []
+        self.scheduled_commands: list[ScheduledCommand] = []
 
     def _run_system_command(self, command: str) -> None:
         """Run a system command.
@@ -152,7 +173,10 @@ class Scheduler:
                 # Recalculate delay for each repetition
                 if delay > 0:
                     actual_delay = max(
-                        0, int(random.gauss(mu=delay, sigma=0.15 * delay))
+                        0,
+                        int(
+                            random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
+                        ),
                     )
                 else:
                     actual_delay = 0
@@ -171,13 +195,14 @@ class Scheduler:
                     m = (total_seconds % 3600) // 60
                     base_time_str = f"{h:02d}:{m:02d}"
 
+                # Calculate actual time with delay
                 actual_time = self._calculate_actual_time(base_time_str, actual_delay)
 
                 schedule.every().day.at(actual_time).do(
                     self._run_system_command, command
                 )
                 self.scheduled_commands.append(
-                    (command_type, command, actual_time, actual_delay)
+                    ScheduledCommand(command_type, command, actual_time, actual_delay)
                 )
                 logger.info(
                     "Scheduled system command '%s' (execution %s/%s) at %s "
@@ -315,14 +340,14 @@ class Scheduler:
 
         # Log all scheduled commands
         logger.info("Scheduled commands:")
-        for command_type, command, time_str, delay in self.scheduled_commands:
-            next_run = self._calculate_next_run(time_str)
+        for cmd in self.scheduled_commands:
+            next_run = self._calculate_next_run(cmd.time)
             logger.info(
                 "%s • %s • %s • delay: %ss",
-                command_type,
-                command,
+                cmd.command_type,
+                cmd.command,
                 next_run,
-                delay,
+                cmd.delay,
             )
 
     def run(self) -> None:

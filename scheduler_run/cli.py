@@ -49,12 +49,17 @@ def main(
     """Run the scheduler with commands from YAML file(s).
 
     The YAML file(s) should have a 'schedules' key with a list of entries,
-    each containing: type, command, time
+    each containing: type, command, time, delay (optional), repetitions (optional),
+    interval (optional)
+
     Example:
         schedules:
           - type: system
             command: echo 'hello world'
             time: '14:10'
+            delay: 10
+            repetitions: 3
+            interval: 3600
 
     Args:
         files: List of paths to YAML files containing scheduled commands.
