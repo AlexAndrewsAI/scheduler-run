@@ -1277,7 +1277,7 @@ def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
 def test_load_schedule_multiple_files_second_missing(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule aborts when a later YAML file is missing."""
+    """Test load_schedule aborts when a later YAML file is missing without partial progress logs."""
     yaml_file1 = tmp_path / "schedule1.yaml"
     yaml_file1.write_text(
         "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"
@@ -1292,8 +1292,8 @@ def test_load_schedule_multiple_files_second_missing(
     with pytest.raises(FileNotFoundError):
         scheduler.load_schedule()
 
-    # Verify first file was loaded before error
-    assert f"Loading schedule from {yaml_file1}" in caplog.text
+    # Verify NO progress logs appear (atomic failure - no partial state)
+    assert f"Loading schedule from {yaml_file1}" not in caplog.text
     assert f"YAML file not found: {yaml_file2}" in caplog.text
     # Verify no commands were scheduled due to atomicity
     assert len(scheduler._job_registry.get_jobs()) == 0

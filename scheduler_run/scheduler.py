@@ -506,18 +506,19 @@ class Scheduler:
         2. Schedule all validated entries in one pass
 
         If any file fails to load or validate, no changes are made to the
-        scheduled commands.
+        scheduled commands. Progress logging is deferred until all files
+        are successfully validated to avoid misleading partial state on failure.
         """
         yaml_paths = self.config.yaml_paths
-        logger.info("Loading schedule from %s YAML file(s)", len(yaml_paths))
 
-        # Phase 1: Load and validate all YAML files
+        # Phase 1: Load and validate all YAML files (no progress logging yet)
         all_entries: list[ScheduleEntry] = []
         seen_entries: set[tuple[str, str, str, int, int, int]] = set()
+        loaded_files: list[Path] = []
+        duplicate_warnings: list[tuple[Path, ScheduleEntry]] = []
+        allowed_duplicates: list[tuple[Path, ScheduleEntry]] = []
 
         for yaml_path in yaml_paths:
-            logger.info("Loading schedule from %s", yaml_path)
-
             try:
                 with open(yaml_path, encoding="utf-8") as yamlfile:
                     data = yaml.safe_load(yamlfile)
@@ -526,79 +527,89 @@ class Scheduler:
                             f"Invalid YAML format in {yaml_path}: "
                             "missing 'schedules' key"
                         )
-                        logger.error("%s", error_msg)
                         raise ValueError(error_msg)
 
                     for entry_data in data["schedules"]:
-                        try:
-                            if not isinstance(entry_data, dict):
-                                error_msg = (
-                                    f"Invalid entry in {yaml_path}: expected dict, "
-                                    f"got {type(entry_data).__name__}: {entry_data}"
-                                )
-                                logger.error("%s", error_msg)
-                                raise ValueError(error_msg)
-                            entry = ScheduleEntry(**entry_data)
-                            entry_key = (
-                                entry.type,
-                                entry.command,
-                                entry.time,
-                                entry.delay,
-                                entry.repetitions,
-                                entry.interval,
-                            )
-                            if entry_key in seen_entries:
-                                if self.config.allow_duplicates:
-                                    logger.info(
-                                        "Allowing duplicate entry in %s: "
-                                        "type='%s', command='%s', time='%s', "
-                                        "delay=%s, repetitions=%s, interval=%s",
-                                        yaml_path,
-                                        entry.type,
-                                        entry.command,
-                                        entry.time,
-                                        entry.delay,
-                                        entry.repetitions,
-                                        entry.interval,
-                                    )
-                                    all_entries.append(entry)
-                                else:
-                                    logger.warning(
-                                        "Duplicate entry detected in %s: "
-                                        "type='%s', command='%s', time='%s', "
-                                        "delay=%s, repetitions=%s, interval=%s. "
-                                        "Use allow_duplicates=True or "
-                                        "--allow-duplicates to permit.",
-                                        yaml_path,
-                                        entry.type,
-                                        entry.command,
-                                        entry.time,
-                                        entry.delay,
-                                        entry.repetitions,
-                                        entry.interval,
-                                    )
-                            else:
-                                seen_entries.add(entry_key)
-                                all_entries.append(entry)
-                        except ValidationError as e:
+                        if not isinstance(entry_data, dict):
                             error_msg = (
-                                f"Invalid entry in {yaml_path}: {entry_data}. "
-                                f"Error: {e}"
+                                f"Invalid entry in {yaml_path}: expected dict, "
+                                f"got {type(entry_data).__name__}: {entry_data}"
                             )
-                            logger.error("%s", error_msg)
-                            raise
+                            raise ValueError(error_msg)
+                        entry = ScheduleEntry(**entry_data)
+                        entry_key = (
+                            entry.type,
+                            entry.command,
+                            entry.time,
+                            entry.delay,
+                            entry.repetitions,
+                            entry.interval,
+                        )
+                        if entry_key in seen_entries:
+                            if self.config.allow_duplicates:
+                                all_entries.append(entry)
+                                # Defer logging until after validation succeeds
+                                allowed_duplicates.append((yaml_path, entry))
+                            else:
+                                # Defer warning logging until after validation succeeds
+                                duplicate_warnings.append((yaml_path, entry))
+                        else:
+                            seen_entries.add(entry_key)
+                            all_entries.append(entry)
+                    loaded_files.append(yaml_path)
             except FileNotFoundError:
-                logger.error("YAML file not found: %s", yaml_path)
+                error_msg = f"YAML file not found: {yaml_path}"
+                logger.error("%s", error_msg)
                 raise
             except PermissionError:
-                logger.error("Permission denied reading YAML file: %s", yaml_path)
+                error_msg = f"Permission denied reading YAML file: {yaml_path}"
+                logger.error("%s", error_msg)
                 raise
             except yaml.YAMLError as e:
-                logger.error("YAML parsing error in %s: %s", yaml_path, e)
+                error_msg = f"YAML parsing error in {yaml_path}: {e}"
+                logger.error("%s", error_msg)
                 raise
-            except (KeyError, ValueError) as e:
-                logger.error("Invalid YAML data in %s: %s", yaml_path, e)
+            except (KeyError, ValueError, ValidationError) as e:
+                error_msg = f"Invalid entry in {yaml_path}: {e}"
+                logger.error("%s", error_msg)
                 raise
+
+        # All files validated successfully - now log progress
+        logger.info("Loading schedule from %s YAML file(s)", len(loaded_files))
+        for yaml_path in loaded_files:
+            logger.info("Loading schedule from %s", yaml_path)
+
+        # Log allowed duplicates (deferred from validation phase)
+        for yaml_path, entry in allowed_duplicates:
+            logger.info(
+                "Allowing duplicate entry in %s: "
+                "type='%s', command='%s', time='%s', "
+                "delay=%s, repetitions=%s, interval=%s",
+                yaml_path,
+                entry.type,
+                entry.command,
+                entry.time,
+                entry.delay,
+                entry.repetitions,
+                entry.interval,
+            )
+
+        # Log duplicate warnings (deferred from validation phase)
+        for yaml_path, entry in duplicate_warnings:
+            logger.warning(
+                "Duplicate entry detected in %s: "
+                "type='%s', command='%s', time='%s', "
+                "delay=%s, repetitions=%s, interval=%s. "
+                "Use allow_duplicates=True or "
+                "--allow-duplicates to permit.",
+                yaml_path,
+                entry.type,
+                entry.command,
+                entry.time,
+                entry.delay,
+                entry.repetitions,
+                entry.interval,
+            )
 
         # Phase 2: Clear and schedule all validated entries
         self._job_registry.clear()
