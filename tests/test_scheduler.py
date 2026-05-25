@@ -32,14 +32,14 @@ def test_scheduler_registers_system_runner() -> None:
     """Test Scheduler registers the system command runner on initialization."""
     # Save original system runner
     original_system = COMMAND_RUNNERS.get("system")
-    
+
     COMMAND_RUNNERS.clear()
     assert "system" not in COMMAND_RUNNERS
 
     scheduler = Scheduler()
     assert "system" in COMMAND_RUNNERS
     assert COMMAND_RUNNERS["system"] == scheduler._run_system_command
-    
+
     # Restore original system runner
     if original_system is not None:
         COMMAND_RUNNERS["system"] = original_system

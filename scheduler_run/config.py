@@ -14,14 +14,16 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # Registry of command runners: maps command type to execution function
 COMMAND_RUNNERS: dict[str, Callable[[str], None]] = {}
 
+
 # Placeholder for system runner - will be registered by Scheduler.__init__
 # This ensures the registry is never empty during validation
-def _system_runner_placeholder(command: str) -> None:
-    """Placeholder for system command runner."""
+def _system_runner_placeholder(_command: str) -> None:
+    """Raise error if system command runner is not registered."""
     raise RuntimeError(
         "System command runner not registered. "
         "Initialize a Scheduler instance before using system commands."
     )
+
 
 COMMAND_RUNNERS["system"] = _system_runner_placeholder
 

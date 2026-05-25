@@ -309,9 +309,9 @@ def test_schedule_entry_validation_uses_registry() -> None:
     """Test ScheduleEntry validation uses COMMAND_RUNNERS registry."""
     # Save original system runner
     original_system = COMMAND_RUNNERS.get("system")
-    
+
     # Add a custom type
-    COMMAND_RUNNERS["custom"] = lambda cmd: None  # type: ignore[assignment]
+    COMMAND_RUNNERS["custom"] = lambda _cmd: None  # type: ignore[assignment]
 
     # Custom type should now be valid
     entry = ScheduleEntry(type="custom", command="echo test", time="14:30")
@@ -328,12 +328,13 @@ def test_schedule_entry_unsupported_type_uses_registry() -> None:
     """Test unsupported type error message includes registered types."""
     # Save original registry
     original_registry = COMMAND_RUNNERS.copy()
-    
+
     COMMAND_RUNNERS.clear()
-    COMMAND_RUNNERS["system"] = lambda cmd: None  # type: ignore[assignment]
+    COMMAND_RUNNERS["system"] = lambda _cmd: None  # type: ignore[assignment]
 
     with pytest.raises(
-        ValueError, match="Unsupported command type: 'unsupported'. Supported types: system"
+        ValueError,
+        match=r"Unsupported command type: 'unsupported'. Supported types: system",
     ):
         ScheduleEntry(type="unsupported", command="echo test", time="14:30")
 

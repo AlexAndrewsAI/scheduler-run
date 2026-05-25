@@ -219,7 +219,7 @@ class Scheduler:
         self._running_processes: list[subprocess.Popen[bytes]] = []
         self._pending_queue: deque[tuple[str, str]] = deque()  # (command_type, command)
         self._job_registry = JobRegistry()
-        
+
         # Register the system command runner
         COMMAND_RUNNERS["system"] = self._run_system_command
 
@@ -481,9 +481,7 @@ class Scheduler:
             if delay > 0:
                 actual_delay = max(
                     0,
-                    int(
-                        random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
-                    ),
+                    int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
                 )
             else:
                 actual_delay = 0
