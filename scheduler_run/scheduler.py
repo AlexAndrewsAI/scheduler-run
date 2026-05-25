@@ -34,6 +34,7 @@ class Job:
         kwargs: Keyword arguments to pass to the function.
         target_time_str: The target execution time in HH:MM:SS format.
         last_run: The datetime when this job was last run.
+        next_run: The datetime when this job should next run.
 
     """
 
@@ -58,6 +59,27 @@ class Job:
         self.kwargs = kwargs
         self.target_time_str = target_time_str
         self.last_run: datetime.datetime | None = None
+        self.next_run: datetime.datetime = self._calculate_next_run()
+
+    def _calculate_next_run(self) -> datetime.datetime:
+        """Calculate the next run datetime for this job.
+
+        Returns:
+            The next execution datetime.
+        """
+        now = datetime.datetime.now()
+        parts = self.target_time_str.split(":")
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = int(parts[2]) if len(parts) > 2 else 0
+
+        target_dt = now.replace(
+            hour=hours, minute=minutes, second=seconds, microsecond=0
+        )
+        if target_dt <= now:
+            target_dt += datetime.timedelta(days=1)
+
+        return target_dt
 
     def should_run(self, now: datetime.datetime) -> bool:
         """Check if the job should run at the given time.
@@ -69,36 +91,13 @@ class Job:
             True if the job should run, False otherwise.
 
         """
-        if self.last_run is None:
-            # Never run before, check if we've passed the target time today
-            parts = self.target_time_str.split(":")
-            hours = int(parts[0])
-            minutes = int(parts[1])
-            seconds = int(parts[2]) if len(parts) > 2 else 0
-
-            target_dt = now.replace(
-                hour=hours, minute=minutes, second=seconds, microsecond=0
-            )
-            return now >= target_dt
-
-        # Already ran today, check if it's a new day
-        if self.last_run.date() < now.date():
-            parts = self.target_time_str.split(":")
-            hours = int(parts[0])
-            minutes = int(parts[1])
-            seconds = int(parts[2]) if len(parts) > 2 else 0
-
-            target_dt = now.replace(
-                hour=hours, minute=minutes, second=seconds, microsecond=0
-            )
-            return now >= target_dt
-
-        return False
+        return now >= self.next_run
 
     def run(self) -> None:
         """Execute the job."""
         self.func(*self.args, **self.kwargs)
         self.last_run = datetime.datetime.now()
+        self.next_run = self._calculate_next_run()
 
 
 class JobRegistry:
