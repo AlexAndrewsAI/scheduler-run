@@ -1515,10 +1515,10 @@ def test_job_registry_run_pending_exception_handling(
     # Schedule a job that will fail
     registry.schedule_daily(failing_func, "00:00:00")
 
-    # Set last_run to yesterday so it should run
-    yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
+    # Set next_run to past so it should run
+    past = datetime.datetime.now() - datetime.timedelta(seconds=1)
     for job in registry.get_jobs():
-        job.last_run = yesterday
+        job.next_run = past
 
     # Run pending - should handle exception gracefully
     registry.run_pending()

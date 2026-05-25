@@ -66,6 +66,7 @@ class Job:
 
         Returns:
             The next execution datetime.
+
         """
         now = datetime.datetime.now()
         parts = self.target_time_str.split(":")
