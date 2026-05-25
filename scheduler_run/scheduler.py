@@ -92,6 +92,23 @@ class Job:
             True if the job should run, False otherwise.
 
         """
+        # If last_run was on a previous day, recalculate next_run based on last_run
+        if self.last_run is not None:
+            # Calculate what today's target time would be
+            parts = self.target_time_str.split(":")
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = int(parts[2]) if len(parts) > 2 else 0
+
+            today_target = now.replace(
+                hour=hours, minute=minutes, second=seconds, microsecond=0
+            )
+
+            # If last_run was before today's target time and now is after it,
+            # the job should run
+            if self.last_run.date() < now.date() and now >= today_target:
+                return True
+
         return now >= self.next_run
 
     def run(self) -> None:

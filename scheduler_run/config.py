@@ -63,6 +63,10 @@ class Config(BaseModel):
         Returns:
             A list of Path objects derived from ``yaml_path``.
 
+        Raises:
+            TypeError: If the underlying yaml_path has an unexpected type.
+                This can occur when using model_construct to bypass validators.
+
         """
         v = self.yaml_path
         # The field_validator already runs mode="before", so at runtime v is
@@ -74,7 +78,11 @@ class Config(BaseModel):
             return [v]
         if isinstance(v, list):
             return [Path(item) if isinstance(item, str) else item for item in v]
-        return [Path("schedule.yaml")]  # unreachable, but makes mypy happy
+        raise TypeError(
+            f"Invalid type for yaml_path: {type(v)}. "
+            "Use Config() constructor with proper validation "
+            "instead of model_construct."
+        )
 
     @field_validator("yaml_path", mode="before")
     @classmethod

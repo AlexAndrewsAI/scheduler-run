@@ -252,9 +252,10 @@ def test_config_yaml_paths_from_list() -> None:
 
 
 def test_config_yaml_paths_fallback() -> None:
-    """Test yaml_paths fallback for unexpected runtime types (mypy guard)."""
+    """Test yaml_paths raises TypeError for unexpected runtime types."""
     config = Config.model_construct(yaml_path=123)
-    assert config.yaml_paths == [Path("schedule.yaml")]
+    with pytest.raises(TypeError, match="Invalid type for yaml_path"):
+        _ = config.yaml_paths
 
 
 def test_config_normalize_yaml_path_mixed_list() -> None:
