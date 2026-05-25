@@ -10,7 +10,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from scheduler_run.config import Config
+from scheduler_run.config import COMMAND_RUNNERS, Config
 from scheduler_run.scheduler import Scheduler
 
 
@@ -26,6 +26,23 @@ def test_scheduler_init_custom_config() -> None:
     config = Config(yaml_path=custom_path)
     scheduler = Scheduler(config)
     assert scheduler.config.yaml_path == [custom_path]
+
+
+def test_scheduler_registers_system_runner() -> None:
+    """Test Scheduler registers the system command runner on initialization."""
+    # Save original system runner
+    original_system = COMMAND_RUNNERS.get("system")
+    
+    COMMAND_RUNNERS.clear()
+    assert "system" not in COMMAND_RUNNERS
+
+    scheduler = Scheduler()
+    assert "system" in COMMAND_RUNNERS
+    assert COMMAND_RUNNERS["system"] == scheduler._run_system_command
+    
+    # Restore original system runner
+    if original_system is not None:
+        COMMAND_RUNNERS["system"] = original_system
 
 
 def test_run_system_command_success(caplog: pytest.LogCaptureFixture) -> None:

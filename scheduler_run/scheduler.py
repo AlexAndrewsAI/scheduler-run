@@ -17,7 +17,7 @@ from typing import Any, NamedTuple
 import yaml
 from pydantic import ValidationError
 
-from scheduler_run.config import Config, ScheduleEntry
+from scheduler_run.config import COMMAND_RUNNERS, Config, ScheduleEntry
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +219,9 @@ class Scheduler:
         self._running_processes: list[subprocess.Popen[bytes]] = []
         self._pending_queue: deque[tuple[str, str]] = deque()  # (command_type, command)
         self._job_registry = JobRegistry()
+        
+        # Register the system command runner
+        COMMAND_RUNNERS["system"] = self._run_system_command
 
     def _reap_finished_processes(self) -> None:
         """Remove finished child processes and log their exit status."""
@@ -263,8 +266,8 @@ class Scheduler:
             # No limit, process all pending commands
             while self._pending_queue:
                 command_type, command = self._pending_queue.popleft()
-                if command_type == "system":
-                    self._run_system_command(command)
+                if command_type in COMMAND_RUNNERS:
+                    COMMAND_RUNNERS[command_type](command)
                 else:
                     logger.error("Unsupported command type in queue: %s", command_type)
             return
@@ -279,8 +282,8 @@ class Scheduler:
                 max_concurrent,
                 len(self._pending_queue),
             )
-            if command_type == "system":
-                self._run_system_command(command)
+            if command_type in COMMAND_RUNNERS:
+                COMMAND_RUNNERS[command_type](command)
             else:
                 logger.error("Unsupported command type in queue: %s", command_type)
 
@@ -437,7 +440,7 @@ class Scheduler:
         """Schedule a single command.
 
         Args:
-            command_type: The type of command (currently only "system" supported).
+            command_type: The type of command (e.g., "system").
             command: The command to execute.
             time_str: The time to run the command in 24h format (e.g., "14:10").
             delay: Optional base delay in seconds.
@@ -447,68 +450,74 @@ class Scheduler:
                 the interval is auto-calculated to spread runs evenly
                 throughout the day.
 
+        Raises:
+            ValueError: If the command type is not registered in COMMAND_RUNNERS.
+
         """
-        if command_type == "system":
-            # Auto-calculate interval if -1 and repetitions > 0
-            if interval == -1 and repetitions > 0:
-                interval = (24 * 3600) // (repetitions + 1)
-                logger.info(
-                    "Auto-calculated interval: %ss to spread %s executions "
-                    "evenly throughout the day",
-                    interval,
-                    repetitions + 1,
-                )
-
-            # Calculate the number of executions (1 + repetitions)
-            num_executions = 1 + repetitions
-
-            for i in range(num_executions):
-                # Recalculate delay for each repetition
-                if delay > 0:
-                    actual_delay = max(
-                        0,
-                        int(
-                            random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
-                        ),
-                    )
-                else:
-                    actual_delay = 0
-
-                # Calculate the base time for this execution
-                if i == 0:
-                    base_time_str = time_str
-                else:
-                    # Add interval to the previous execution time
-                    parts = time_str.split(":")
-                    hours = int(parts[0])
-                    minutes = int(parts[1])
-                    total_seconds = hours * 3600 + minutes * 60 + (i * interval)
-                    total_seconds = total_seconds % (24 * 3600)
-                    h = total_seconds // 3600
-                    m = (total_seconds % 3600) // 60
-                    base_time_str = f"{h:02d}:{m:02d}"
-
-                # Calculate actual time with delay
-                actual_time = self._calculate_actual_time(base_time_str, actual_delay)
-
-                self._job_registry.schedule_daily(
-                    self._run_system_command, actual_time, command
-                )
-                self.scheduled_commands.append(
-                    ScheduledCommand(command_type, command, actual_time, actual_delay)
-                )
-                logger.info(
-                    "Scheduled system command '%s' (execution %s/%s) at %s "
-                    "with calculated delay %ss",
-                    command,
-                    i + 1,
-                    num_executions,
-                    actual_time,
-                    actual_delay,
-                )
-        else:
+        if command_type not in COMMAND_RUNNERS:
+            supported_types_str = ", ".join(sorted(COMMAND_RUNNERS.keys()))
             raise ValueError(
-                f"Unsupported command type: {command_type}. Supported types: system"
+                f"Unsupported command type: {command_type}. "
+                f"Supported types: {supported_types_str}"
+            )
+
+        runner = COMMAND_RUNNERS[command_type]
+
+        # Auto-calculate interval if -1 and repetitions > 0
+        if interval == -1 and repetitions > 0:
+            interval = (24 * 3600) // (repetitions + 1)
+            logger.info(
+                "Auto-calculated interval: %ss to spread %s executions "
+                "evenly throughout the day",
+                interval,
+                repetitions + 1,
+            )
+
+        # Calculate the number of executions (1 + repetitions)
+        num_executions = 1 + repetitions
+
+        for i in range(num_executions):
+            # Recalculate delay for each repetition
+            if delay > 0:
+                actual_delay = max(
+                    0,
+                    int(
+                        random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
+                    ),
+                )
+            else:
+                actual_delay = 0
+
+            # Calculate the base time for this execution
+            if i == 0:
+                base_time_str = time_str
+            else:
+                # Add interval to the previous execution time
+                parts = time_str.split(":")
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                total_seconds = hours * 3600 + minutes * 60 + (i * interval)
+                total_seconds = total_seconds % (24 * 3600)
+                h = total_seconds // 3600
+                m = (total_seconds % 3600) // 60
+                base_time_str = f"{h:02d}:{m:02d}"
+
+            # Calculate actual time with delay
+            actual_time = self._calculate_actual_time(base_time_str, actual_delay)
+
+            self._job_registry.schedule_daily(runner, actual_time, command)
+            self.scheduled_commands.append(
+                ScheduledCommand(command_type, command, actual_time, actual_delay)
+            )
+            logger.info(
+                "Scheduled %s command '%s' (execution %s/%s) at %s "
+                "with calculated delay %ss",
+                command_type,
+                command,
+                i + 1,
+                num_executions,
+                actual_time,
+                actual_delay,
             )
 
     def load_schedule(self) -> None:

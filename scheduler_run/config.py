@@ -5,11 +5,25 @@ Provides configuration management using Pydantic models.
 
 import re
 import shlex
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Registry of command runners: maps command type to execution function
+COMMAND_RUNNERS: dict[str, Callable[[str], None]] = {}
+
+# Placeholder for system runner - will be registered by Scheduler.__init__
+# This ensures the registry is never empty during validation
+def _system_runner_placeholder(command: str) -> None:
+    """Placeholder for system command runner."""
+    raise RuntimeError(
+        "System command runner not registered. "
+        "Initialize a Scheduler instance before using system commands."
+    )
+
+COMMAND_RUNNERS["system"] = _system_runner_placeholder
 
 
 class Config(BaseModel):
@@ -229,9 +243,8 @@ class ScheduleEntry(BaseModel):
         """
         if not v.strip():
             raise ValueError("Type cannot be empty")
-        supported_types = {"system"}
-        if v not in supported_types:
-            supported_types_str = ", ".join(sorted(supported_types))
+        if v not in COMMAND_RUNNERS:
+            supported_types_str = ", ".join(sorted(COMMAND_RUNNERS.keys()))
             raise ValueError(
                 f"Unsupported command type: '{v}'. "
                 f"Supported types: {supported_types_str}"

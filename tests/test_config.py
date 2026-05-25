@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scheduler_run.config import Config, ScheduleEntry
+from scheduler_run.config import COMMAND_RUNNERS, Config, ScheduleEntry
 
 
 def test_config_default() -> None:
@@ -292,3 +292,51 @@ def test_schedule_entry_command_empty_list() -> None:
     """Test ScheduleEntry with empty command list raises error."""
     with pytest.raises(ValueError, match="Command cannot be empty"):
         ScheduleEntry(type="system", command=[], time="14:30")  # type: ignore[arg-type]
+
+
+def test_command_runners_registry_exists() -> None:
+    """Test COMMAND_RUNNERS registry exists and is a dict."""
+    assert isinstance(COMMAND_RUNNERS, dict)
+
+
+def test_command_runners_registry_has_system() -> None:
+    """Test COMMAND_RUNNERS registry has system runner by default."""
+    assert "system" in COMMAND_RUNNERS
+    assert len(COMMAND_RUNNERS) >= 1
+
+
+def test_schedule_entry_validation_uses_registry() -> None:
+    """Test ScheduleEntry validation uses COMMAND_RUNNERS registry."""
+    # Save original system runner
+    original_system = COMMAND_RUNNERS.get("system")
+    
+    # Add a custom type
+    COMMAND_RUNNERS["custom"] = lambda cmd: None  # type: ignore[assignment]
+
+    # Custom type should now be valid
+    entry = ScheduleEntry(type="custom", command="echo test", time="14:30")
+    assert entry.type == "custom"
+
+    # Clean up
+    del COMMAND_RUNNERS["custom"]
+    # Restore system runner if it was present
+    if original_system is not None:
+        COMMAND_RUNNERS["system"] = original_system
+
+
+def test_schedule_entry_unsupported_type_uses_registry() -> None:
+    """Test unsupported type error message includes registered types."""
+    # Save original registry
+    original_registry = COMMAND_RUNNERS.copy()
+    
+    COMMAND_RUNNERS.clear()
+    COMMAND_RUNNERS["system"] = lambda cmd: None  # type: ignore[assignment]
+
+    with pytest.raises(
+        ValueError, match="Unsupported command type: 'unsupported'. Supported types: system"
+    ):
+        ScheduleEntry(type="unsupported", command="echo test", time="14:30")
+
+    # Restore original registry
+    COMMAND_RUNNERS.clear()
+    COMMAND_RUNNERS.update(original_registry)
