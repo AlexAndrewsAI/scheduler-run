@@ -26,6 +26,9 @@ class Config(BaseModel):
             If None (default), there is no limit. If set to a positive integer,
             the scheduler will queue commands when the limit is reached and
             start them as slots become available.
+        capture_output: Whether to capture stdout/stderr from subprocesses.
+            If True (default), output is captured and logged on failure.
+            If False, output is discarded (subprocess.DEVNULL).
 
     """
 
@@ -40,6 +43,10 @@ class Config(BaseModel):
     max_concurrent: int | None = Field(
         default=5,
         description="Maximum number of concurrent subprocesses to run",
+    )
+    capture_output: bool = Field(
+        default=True,
+        description="Whether to capture stdout/stderr from subprocesses",
     )
 
     model_config = {"title": "Scheduler Config", "frozen": True}

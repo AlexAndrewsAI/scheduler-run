@@ -82,6 +82,23 @@ class Scheduler:
                 logger.info("Command completed: %s (exit %s)", command, return_code)
             else:
                 logger.error("Command failed: %s (exit %s)", command, return_code)
+                # Log captured output if available
+                if self.config.capture_output:
+                    stdout, stderr = process.communicate()
+                    if stdout:
+                        logger.error(
+                            "stdout: %s", stdout.decode(errors="replace").strip()
+                        )
+                    if stderr:
+                        logger.error(
+                            "stderr: %s", stderr.decode(errors="replace").strip()
+                        )
+                    logger.warning(
+                        "Command '%s' failed with exit code %s. "
+                        "Check the logs above for output details.",
+                        command,
+                        return_code,
+                    )
         self._running_processes = still_running
         self._process_pending_queue()
 
@@ -186,11 +203,18 @@ class Scheduler:
         logger.info("Starting system command: %s", command)
         try:
             args = shlex.split(command)
-            process = subprocess.Popen(  # noqa: S603
-                args,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            if self.config.capture_output:
+                process = subprocess.Popen(  # noqa: S603
+                    args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            else:
+                process = subprocess.Popen(  # noqa: S603
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
         except FileNotFoundError as e:
             logger.error("Command not found: %s. Error: %s", command, e)
             return

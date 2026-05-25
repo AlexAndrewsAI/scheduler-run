@@ -29,8 +29,29 @@ def test_scheduler_init_custom_config() -> None:
 
 
 def test_run_system_command_success(caplog: pytest.LogCaptureFixture) -> None:
-    """Test _run_system_command starts a background subprocess."""
+    """Test _run_system_command starts a background subprocess with capture_output=True."""
     scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = mock_process
+        scheduler._run_system_command("echo 'test'")
+        mock_popen.assert_called_once_with(
+            ["echo", "test"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert scheduler._running_processes == [mock_process]
+        assert "Starting system command: echo 'test'" in caplog.text
+
+
+def test_run_system_command_capture_output_false(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _run_system_command with capture_output=False discards output."""
+    config = Config(capture_output=False)
+    scheduler = Scheduler(config)
     caplog.set_level(logging.INFO)
 
     mock_process = MagicMock(spec=subprocess.Popen)
@@ -63,8 +84,31 @@ def test_reap_finished_processes_success(caplog: pytest.LogCaptureFixture) -> No
 
 
 def test_reap_finished_processes_failure(caplog: pytest.LogCaptureFixture) -> None:
-    """Test _reap_finished_processes logs failure for non-zero exit."""
+    """Test _reap_finished_processes logs failure for non-zero exit with captured output."""
     scheduler = Scheduler()
+    caplog.set_level(logging.WARNING)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = 1
+    mock_process.args = ["false"]
+    mock_process.communicate.return_value = (b"stdout output", b"stderr output")
+    scheduler._running_processes = [mock_process]
+
+    scheduler._reap_finished_processes()
+
+    assert scheduler._running_processes == []
+    assert "Command failed: false (exit 1)" in caplog.text
+    assert "stdout: stdout output" in caplog.text
+    assert "stderr: stderr output" in caplog.text
+    assert "Check the logs above for output details" in caplog.text
+
+
+def test_reap_finished_processes_failure_no_capture(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes logs failure without captured output when disabled."""
+    config = Config(capture_output=False)
+    scheduler = Scheduler(config)
     caplog.set_level(logging.ERROR)
 
     mock_process = MagicMock(spec=subprocess.Popen)
@@ -76,6 +120,9 @@ def test_reap_finished_processes_failure(caplog: pytest.LogCaptureFixture) -> No
 
     assert scheduler._running_processes == []
     assert "Command failed: false (exit 1)" in caplog.text
+    assert "stdout:" not in caplog.text
+    assert "stderr:" not in caplog.text
+    assert "Check the logs above for output details" not in caplog.text
 
 
 def test_reap_finished_processes_keeps_running() -> None:

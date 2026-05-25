@@ -214,6 +214,24 @@ def test_config_allow_duplicates_true() -> None:
     assert config.allow_duplicates is True
 
 
+def test_config_capture_output_default() -> None:
+    """Test Config default capture_output value."""
+    config = Config()
+    assert config.capture_output is True
+
+
+def test_config_capture_output_true() -> None:
+    """Test Config with capture_output set to True."""
+    config = Config(capture_output=True)
+    assert config.capture_output is True
+
+
+def test_config_capture_output_false() -> None:
+    """Test Config with capture_output set to False."""
+    config = Config(capture_output=False)
+    assert config.capture_output is False
+
+
 def test_config_yaml_paths_from_string() -> None:
     """Test yaml_paths when yaml_path is a raw string (bypasses validator)."""
     config = Config.model_construct(yaml_path="foo.yaml")
