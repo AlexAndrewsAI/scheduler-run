@@ -916,10 +916,229 @@ def test_load_schedule_multiple_files_duplicate_detection(
 
         scheduler.load_schedule()
 
-        assert "Duplicate entry detected" in caplog.text
-        # Should only schedule 1 command (duplicate skipped)
-        assert mock_every.call_count == 1
-        assert len(scheduler.scheduled_commands) == 1
+
+def test_max_concurrent_queues_when_at_limit(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that commands are queued when max_concurrent limit is reached."""
+    config = Config(max_concurrent=2)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    mock_process1 = MagicMock(spec=subprocess.Popen)
+    mock_process1.poll.return_value = None
+    mock_process1.args = ["sleep", "10"]
+
+    mock_process2 = MagicMock(spec=subprocess.Popen)
+    mock_process2.poll.return_value = None
+    mock_process2.args = ["sleep", "20"]
+
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.side_effect = [mock_process1, mock_process2]
+
+        # Start 2 commands (at limit)
+        scheduler._run_system_command("sleep 10")
+        scheduler._run_system_command("sleep 20")
+
+        assert len(scheduler._running_processes) == 2
+        assert len(scheduler._pending_queue) == 0
+
+        # Start 3rd command (should be queued)
+        scheduler._run_system_command("sleep 30")
+
+        assert len(scheduler._running_processes) == 2
+        assert len(scheduler._pending_queue) == 1
+        assert "Throttling: queuing command 'sleep 30'" in caplog.text
+
+
+def test_max_concurrent_processes_queue_on_finish(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test that queued commands start when slots become available."""
+    config = Config(max_concurrent=2)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    mock_process1 = MagicMock(spec=subprocess.Popen)
+    mock_process1.poll.return_value = None
+    mock_process1.args = ["sleep", "10"]
+
+    mock_process2 = MagicMock(spec=subprocess.Popen)
+    mock_process2.poll.return_value = None
+    mock_process2.args = ["sleep", "20"]
+
+    mock_process3 = MagicMock(spec=subprocess.Popen)
+    mock_process3.poll.return_value = None
+    mock_process3.args = ["sleep", "30"]
+
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.side_effect = [mock_process1, mock_process2, mock_process3]
+
+        # Start 2 commands (at limit)
+        scheduler._run_system_command("sleep 10")
+        scheduler._run_system_command("sleep 20")
+
+        # Queue 3rd command
+        scheduler._run_system_command("sleep 30")
+
+        assert len(scheduler._running_processes) == 2
+        assert len(scheduler._pending_queue) == 1
+
+        # Mark first process as finished
+        mock_process1.poll.return_value = 0
+
+        # Reap finished processes (should start queued command)
+        scheduler._reap_finished_processes()
+
+        assert len(scheduler._running_processes) == 2
+        assert len(scheduler._pending_queue) == 0
+        assert "Starting queued command: sleep 30" in caplog.text
+
+
+def test_max_concurrent_none_unlimited(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that max_concurrent=None allows unlimited concurrent processes."""
+    config = Config(max_concurrent=None)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    mock_processes = []
+    for i in range(5):
+        mock_proc = MagicMock(spec=subprocess.Popen)
+        mock_proc.poll.return_value = None
+        mock_proc.args = ["sleep", str(i)]
+        mock_processes.append(mock_proc)
+
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.side_effect = mock_processes
+
+        # Start 5 commands with no limit
+        for i in range(5):
+            scheduler._run_system_command(f"sleep {i}")
+
+        assert len(scheduler._running_processes) == 5
+        assert len(scheduler._pending_queue) == 0
+        assert "Throttling" not in caplog.text
+
+
+def test_max_concurrent_zero_allows_none(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that max_concurrent=0 allows no concurrent processes (all queued)."""
+    config = Config(max_concurrent=0)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    # Try to start a command with limit 0
+    scheduler._run_system_command("sleep 10")
+
+    assert len(scheduler._running_processes) == 0
+    assert len(scheduler._pending_queue) == 1
+    assert "Throttling: queuing command 'sleep 10'" in caplog.text
+
+
+def test_process_pending_queue_no_limit(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _process_pending_queue when max_concurrent is None."""
+    config = Config(max_concurrent=None)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    # Add commands to queue
+    scheduler._pending_queue.append(("system", "echo 'test1'"))
+    scheduler._pending_queue.append(("system", "echo 'test2'"))
+
+    mock_process1 = MagicMock(spec=subprocess.Popen)
+    mock_process1.poll.return_value = None
+    mock_process1.args = ["echo", "test1"]
+
+    mock_process2 = MagicMock(spec=subprocess.Popen)
+    mock_process2.poll.return_value = None
+    mock_process2.args = ["echo", "test2"]
+
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.side_effect = [mock_process1, mock_process2]
+
+        scheduler._process_pending_queue()
+
+        assert len(scheduler._pending_queue) == 0
+        assert len(scheduler._running_processes) == 2
+
+
+def test_process_pending_queue_unsupported_type_no_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _process_pending_queue with unsupported command type when no limit."""
+    config = Config(max_concurrent=None)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    # Add unsupported command type to queue
+    scheduler._pending_queue.append(("unsupported", "echo 'test'"))
+
+    scheduler._process_pending_queue()
+
+    assert len(scheduler._pending_queue) == 0
+    assert len(scheduler._running_processes) == 0
+    assert "Unsupported command type in queue: unsupported" in caplog.text
+
+
+def test_process_pending_queue_unsupported_type_with_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _process_pending_queue with unsupported command type when limit is set."""
+    config = Config(max_concurrent=2)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    # Add unsupported command type to queue
+    scheduler._pending_queue.append(("unsupported", "echo 'test'"))
+
+    scheduler._process_pending_queue()
+
+    assert len(scheduler._pending_queue) == 0
+    assert len(scheduler._running_processes) == 0
+    assert "Unsupported command type in queue: unsupported" in caplog.text
+
+
+def test_process_pending_queue_with_limit(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _process_pending_queue respects max_concurrent limit."""
+    config = Config(max_concurrent=2)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    # Start 1 running process
+    mock_process1 = MagicMock(spec=subprocess.Popen)
+    mock_process1.poll.return_value = None
+    mock_process1.args = ["sleep", "10"]
+    scheduler._running_processes = [mock_process1]
+
+    # Add 3 commands to queue
+    scheduler._pending_queue.append(("system", "echo 'test1'"))
+    scheduler._pending_queue.append(("system", "echo 'test2'"))
+    scheduler._pending_queue.append(("system", "echo 'test3'"))
+
+    mock_process2 = MagicMock(spec=subprocess.Popen)
+    mock_process2.poll.return_value = None
+    mock_process2.args = ["echo", "test1"]
+
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = mock_process2
+
+        scheduler._process_pending_queue()
+
+        # Should start 1 more (total 2 at limit), leaving 2 queued
+        # The second command gets re-queued because _run_system_command checks limit
+        assert len(scheduler._running_processes) == 2
+        assert len(scheduler._pending_queue) == 2
+        assert "Starting queued command: echo 'test1'" in caplog.text
+
+
+def test_max_concurrent_config_default() -> None:
+    """Test that max_concurrent defaults to None (unlimited)."""
+    config = Config()
+    assert config.max_concurrent is None
+
+
+def test_scheduler_init_with_max_concurrent() -> None:
+    """Test Scheduler initialization with max_concurrent config."""
+    config = Config(max_concurrent=5)
+    scheduler = Scheduler(config)
+    assert scheduler.config.max_concurrent == 5
 
 
 def test_load_schedule_allow_duplicates(

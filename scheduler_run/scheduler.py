@@ -10,6 +10,7 @@ import random
 import shlex
 import subprocess
 import time
+from collections import deque
 from collections.abc import Sequence
 from typing import NamedTuple
 
@@ -66,6 +67,7 @@ class Scheduler:
         self.config = config
         self.scheduled_commands: list[ScheduledCommand] = []
         self._running_processes: list[subprocess.Popen[bytes]] = []
+        self._pending_queue: deque[tuple[str, str]] = deque()  # (command_type, command)
 
     def _reap_finished_processes(self) -> None:
         """Remove finished child processes and log their exit status."""
@@ -81,6 +83,38 @@ class Scheduler:
             else:
                 logger.error("Command failed: %s (exit %s)", command, return_code)
         self._running_processes = still_running
+        self._process_pending_queue()
+
+    def _process_pending_queue(self) -> None:
+        """Process pending commands from the queue when slots are available."""
+        if not self._pending_queue:
+            return
+
+        max_concurrent = self.config.max_concurrent
+        if max_concurrent is None:
+            # No limit, process all pending commands
+            while self._pending_queue:
+                command_type, command = self._pending_queue.popleft()
+                if command_type == "system":
+                    self._run_system_command(command)
+                else:
+                    logger.error("Unsupported command type in queue: %s", command_type)
+            return
+
+        # Process as many as we can within the limit
+        while self._pending_queue and len(self._running_processes) < max_concurrent:
+            command_type, command = self._pending_queue.popleft()
+            logger.info(
+                "Starting queued command: %s (running: %s/%s, queued: %s)",
+                command,
+                len(self._running_processes) + 1,
+                max_concurrent,
+                len(self._pending_queue),
+            )
+            if command_type == "system":
+                self._run_system_command(command)
+            else:
+                logger.error("Unsupported command type in queue: %s", command_type)
 
     @staticmethod
     def _process_command(process: subprocess.Popen[bytes]) -> str:
@@ -134,6 +168,21 @@ class Scheduler:
             command: The command to execute.
 
         """
+        max_concurrent = self.config.max_concurrent
+        if (
+            max_concurrent is not None
+            and len(self._running_processes) >= max_concurrent
+        ):
+            logger.info(
+                "Throttling: queuing command '%s' (running: %s/%s, queued: %s)",
+                command,
+                len(self._running_processes),
+                max_concurrent,
+                len(self._pending_queue) + 1,
+            )
+            self._pending_queue.append(("system", command))
+            return
+
         logger.info("Starting system command: %s", command)
         try:
             args = shlex.split(command)

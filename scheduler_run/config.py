@@ -22,6 +22,10 @@ class Config(BaseModel):
             validator; use the :attr:`yaml_paths` property for typed access.
         allow_duplicates: Whether to allow duplicate schedule entries.
             If False (default), duplicate entries are detected and skipped.
+        max_concurrent: Maximum number of concurrent subprocesses to run.
+            If None (default), there is no limit. If set to a positive integer,
+            the scheduler will queue commands when the limit is reached and
+            start them as slots become available.
 
     """
 
@@ -32,6 +36,10 @@ class Config(BaseModel):
     allow_duplicates: bool = Field(
         default=False,
         description="Whether to allow duplicate schedule entries",
+    )
+    max_concurrent: int | None = Field(
+        default=None,
+        description="Maximum number of concurrent subprocesses to run",
     )
 
     model_config = {"title": "Scheduler Config", "frozen": True}

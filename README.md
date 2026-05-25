@@ -84,6 +84,9 @@ uv run scheduler-run schedule1.yaml schedule2.yaml
 # Allow duplicate schedule entries
 uv run scheduler-run --allow-duplicates schedule.yaml
 
+# Limit concurrent subprocesses (prevents resource exhaustion)
+uv run scheduler-run --max-concurrent 5 schedule.yaml
+
 # Show version
 uv run scheduler-run --version
 
@@ -117,6 +120,10 @@ scheduler = Scheduler()
 
 # Or with custom config
 config = Config(yaml_path="path/to/schedule.yaml")
+scheduler = Scheduler(config)
+
+# Or with max_concurrent limit
+config = Config(yaml_path="path/to/schedule.yaml", max_concurrent=5)
 scheduler = Scheduler(config)
 
 # Run the scheduler (blocks indefinitely)
@@ -190,6 +197,7 @@ scheduler-run/
 - **Code quality**: Automated linting with ruff and type checking with mypy
 - **Flexible scheduling**: Uses the schedule library for reliable task execution
 - **Parallel execution**: Overlapping scheduled commands run concurrently as subprocesses
+- **Concurrency limiting**: Optional max_concurrent limit prevents resource exhaustion by queuing commands when the limit is reached
 - **Clean shutdown**: Stopping the scheduler terminates any child processes still running
 
 ## Security Considerations
