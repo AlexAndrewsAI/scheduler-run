@@ -38,7 +38,7 @@ class Config(BaseModel):
         description="Whether to allow duplicate schedule entries",
     )
     max_concurrent: int | None = Field(
-        default=None,
+        default=5,
         description="Maximum number of concurrent subprocesses to run",
     )
 

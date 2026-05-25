@@ -38,9 +38,9 @@ def main(
         help="Allow duplicate schedule entries",
     ),
     max_concurrent: int | None = typer.Option(
-        None,
+        5,
         "--max-concurrent",
-        help="Maximum number of concurrent subprocesses to run (default: unlimited)",
+        help="Maximum number of concurrent subprocesses to run (default: 5)",
     ),
     version: bool | None = typer.Option(
         None,
@@ -71,7 +71,7 @@ def main(
             If not provided, defaults to schedule.yaml in the current directory.
         allow_duplicates: When True, duplicate schedule entries are scheduled twice.
         max_concurrent: Maximum number of concurrent subprocesses to run.
-            If None, there is no limit.
+            Defaults to 5. Set to None for unlimited.
         version: Eager flag handled by version_callback; not used in the body.
 
     """

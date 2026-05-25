@@ -1129,9 +1129,9 @@ def test_process_pending_queue_with_limit(caplog: pytest.LogCaptureFixture) -> N
 
 
 def test_max_concurrent_config_default() -> None:
-    """Test that max_concurrent defaults to None (unlimited)."""
+    """Test that max_concurrent defaults to 5."""
     config = Config()
-    assert config.max_concurrent is None
+    assert config.max_concurrent == 5
 
 
 def test_scheduler_init_with_max_concurrent() -> None:
