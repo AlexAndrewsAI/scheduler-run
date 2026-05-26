@@ -237,7 +237,9 @@ class Scheduler:
         self.config = config
         self.scheduled_commands: list[ScheduledCommand] = []
         self._running_processes: list[RunningProcess] = []
-        self._pending_queue: deque[tuple[str, str, int | None]] = deque()  # (command_type, command, max_runtime)
+        self._pending_queue: deque[tuple[str, str, int | None]] = (
+            deque()
+        )  # (command_type, command, max_runtime)
         self._job_registry = JobRegistry()
 
         # Register the system command runner
@@ -582,7 +584,9 @@ class Scheduler:
                 runner, actual_time, command, max_runtime=max_runtime
             )
             self.scheduled_commands.append(
-                ScheduledCommand(command_type, command, actual_time, actual_delay, max_runtime)
+                ScheduledCommand(
+                    command_type, command, actual_time, actual_delay, max_runtime
+                )
             )
             logger.info(
                 "Scheduled %s command '%s' (execution %s/%s) at %s "
@@ -732,7 +736,9 @@ class Scheduler:
         logger.info("Scheduled commands:")
         for cmd in self.scheduled_commands:
             next_run = self._calculate_next_run(cmd.time)
-            max_rt_str = f"{cmd.max_runtime}s" if cmd.max_runtime is not None else "none"
+            max_rt_str = (
+                f"{cmd.max_runtime}s" if cmd.max_runtime is not None else "none"
+            )
             logger.info(
                 "%s • %s • %s • delay: %ss • max_runtime: %s",
                 cmd.command_type,

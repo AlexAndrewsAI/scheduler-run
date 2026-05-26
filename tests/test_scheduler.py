@@ -101,7 +101,9 @@ def test_reap_finished_processes_success(caplog: pytest.LogCaptureFixture) -> No
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.poll.return_value = 0
     mock_process.args = ["echo", "test"]
-    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
+    scheduler._running_processes = [
+        RunningProcess(mock_process, time.monotonic(), None)
+    ]
 
     scheduler._reap_finished_processes()
 
@@ -120,7 +122,9 @@ def test_reap_finished_processes_failure(
     mock_process.poll.return_value = 1
     mock_process.args = ["false"]
     mock_process.communicate.return_value = (b"stdout output", b"stderr output")
-    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
+    scheduler._running_processes = [
+        RunningProcess(mock_process, time.monotonic(), None)
+    ]
 
     scheduler._reap_finished_processes()
 
@@ -142,7 +146,9 @@ def test_reap_finished_processes_failure_no_capture(
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.poll.return_value = 1
     mock_process.args = ["false"]
-    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
+    scheduler._running_processes = [
+        RunningProcess(mock_process, time.monotonic(), None)
+    ]
 
     scheduler._reap_finished_processes()
 
@@ -290,9 +296,7 @@ def test_kill_process_group_process_already_gone() -> None:
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.pid = 7777
 
-    with patch(
-        "scheduler_run.scheduler.os.getpgid", side_effect=ProcessLookupError
-    ):
+    with patch("scheduler_run.scheduler.os.getpgid", side_effect=ProcessLookupError):
         # Should not raise even when the process no longer exists
         scheduler._kill_process_group(mock_process)
 
@@ -310,9 +314,7 @@ def test_terminate_running_processes_process_already_gone_on_sigterm(
     vanished.pid = 8888
     scheduler._running_processes = [RunningProcess(vanished, time.monotonic(), None)]
 
-    with patch(
-        "scheduler_run.scheduler.os.getpgid", side_effect=ProcessLookupError
-    ):
+    with patch("scheduler_run.scheduler.os.getpgid", side_effect=ProcessLookupError):
         # Should complete without raising, clearing the list
         scheduler._terminate_running_processes()
 
@@ -1181,7 +1183,9 @@ def test_process_pending_queue_with_limit(caplog: pytest.LogCaptureFixture) -> N
     mock_process1 = MagicMock(spec=subprocess.Popen)
     mock_process1.poll.return_value = None
     mock_process1.args = ["sleep", "10"]
-    scheduler._running_processes = [RunningProcess(mock_process1, time.monotonic(), None)]
+    scheduler._running_processes = [
+        RunningProcess(mock_process1, time.monotonic(), None)
+    ]
 
     # Add 3 commands to queue
     scheduler._pending_queue.append(("system", "echo 'test1'", None))

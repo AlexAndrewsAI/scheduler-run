@@ -146,21 +146,13 @@ def test_schedule_entry_max_runtime_valid() -> None:
 
 def test_schedule_entry_max_runtime_invalid() -> None:
     """Test ScheduleEntry rejects zero and negative max_runtime values."""
-    with pytest.raises(
-        ValueError, match="max_runtime must be a positive integer"
-    ):
+    with pytest.raises(ValueError, match="max_runtime must be a positive integer"):
         ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=0)
 
-    with pytest.raises(
-        ValueError, match="max_runtime must be a positive integer"
-    ):
-        ScheduleEntry(
-            type="system", command="echo test", time="14:30", max_runtime=-1
-        )
+    with pytest.raises(ValueError, match="max_runtime must be a positive integer"):
+        ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=-1)
 
-    with pytest.raises(
-        ValueError, match="max_runtime must be a positive integer"
-    ):
+    with pytest.raises(ValueError, match="max_runtime must be a positive integer"):
         ScheduleEntry(
             type="system", command="echo test", time="14:30", max_runtime=-3600
         )
