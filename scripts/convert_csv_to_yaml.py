@@ -88,7 +88,7 @@ def convert_csv_to_yaml(csv_path: Path, yaml_path: Path) -> None:
 
                 # Validate using ScheduleEntry
                 try:
-                    validated_entry = ScheduleEntry(**entry)
+                    validated_entry = ScheduleEntry(**entry)  # type: ignore[arg-type]
                     schedules.append(validated_entry.model_dump())
                 except ValidationError as e:
                     validation_errors += 1

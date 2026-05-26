@@ -45,8 +45,10 @@ def test_scheduler_registers_system_runner() -> None:
         COMMAND_RUNNERS["system"] = original_system
 
 
-def test_run_system_command_success(caplog: pytest.LogCaptureFixture) -> None:
-    """Test _run_system_command starts a background subprocess with capture_output=True."""
+def test_run_system_command_success(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _run_system_command starts a background subprocess with capture_output."""
     scheduler = Scheduler()
     caplog.set_level(logging.INFO)
 
@@ -100,8 +102,10 @@ def test_reap_finished_processes_success(caplog: pytest.LogCaptureFixture) -> No
     assert "Command completed: echo test (exit 0)" in caplog.text
 
 
-def test_reap_finished_processes_failure(caplog: pytest.LogCaptureFixture) -> None:
-    """Test _reap_finished_processes logs failure for non-zero exit with captured output."""
+def test_reap_finished_processes_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes logs failure for non-zero exit with output."""
     scheduler = Scheduler()
     caplog.set_level(logging.WARNING)
 
@@ -123,7 +127,7 @@ def test_reap_finished_processes_failure(caplog: pytest.LogCaptureFixture) -> No
 def test_reap_finished_processes_failure_no_capture(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test _reap_finished_processes logs failure without captured output when disabled."""
+    """Test _reap_finished_processes logs failure without captured output."""
     config = Config(capture_output=False)
     scheduler = Scheduler(config)
     caplog.set_level(logging.ERROR)
@@ -1294,7 +1298,7 @@ def test_repetition_timing_with_delay(caplog: pytest.LogCaptureFixture) -> None:
 def test_load_schedule_multiple_files_second_missing(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule aborts when a later YAML file is missing without partial progress logs."""
+    """Test load_schedule aborts when a later YAML file is missing without logs."""
     yaml_file1 = tmp_path / "schedule1.yaml"
     yaml_file1.write_text(
         "schedules:\n  - type: system\n    command: echo 'hello'\n    time: '14:10'\n"

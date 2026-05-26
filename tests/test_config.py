@@ -305,6 +305,17 @@ def test_command_runners_registry_has_system() -> None:
     assert len(COMMAND_RUNNERS) >= 1
 
 
+def test_system_runner_placeholder_raises_error() -> None:
+    """Test that the placeholder system runner raises RuntimeError when called."""
+    placeholder = COMMAND_RUNNERS["system"]
+    with pytest.raises(
+        RuntimeError,
+        match=r"System command runner not registered. "
+        r"Initialize a Scheduler instance before using system commands.",
+    ):
+        placeholder("echo test")
+
+
 def test_schedule_entry_validation_uses_registry() -> None:
     """Test ScheduleEntry validation uses COMMAND_RUNNERS registry."""
     # Save original system runner
