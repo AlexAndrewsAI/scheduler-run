@@ -2,7 +2,9 @@
 
 import datetime
 import logging
+import signal
 import subprocess
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -11,7 +13,7 @@ import yaml
 from pydantic import ValidationError
 
 from scheduler_run.config import COMMAND_RUNNERS, Config
-from scheduler_run.scheduler import Scheduler
+from scheduler_run.scheduler import RunningProcess, Scheduler
 
 
 def test_scheduler_init_default_config() -> None:
@@ -60,8 +62,11 @@ def test_run_system_command_success(
             ["echo", "test"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            start_new_session=True,
         )
-        assert scheduler._running_processes == [mock_process]
+        assert len(scheduler._running_processes) == 1
+        assert scheduler._running_processes[0].process is mock_process
+        assert scheduler._running_processes[0].max_runtime is None
         assert "Starting system command: echo 'test'" in caplog.text
 
 
@@ -81,8 +86,10 @@ def test_run_system_command_capture_output_false(
             ["echo", "test"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
-        assert scheduler._running_processes == [mock_process]
+        assert len(scheduler._running_processes) == 1
+        assert scheduler._running_processes[0].process is mock_process
         assert "Starting system command: echo 'test'" in caplog.text
 
 
@@ -94,7 +101,7 @@ def test_reap_finished_processes_success(caplog: pytest.LogCaptureFixture) -> No
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.poll.return_value = 0
     mock_process.args = ["echo", "test"]
-    scheduler._running_processes = [mock_process]
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
 
     scheduler._reap_finished_processes()
 
@@ -113,7 +120,7 @@ def test_reap_finished_processes_failure(
     mock_process.poll.return_value = 1
     mock_process.args = ["false"]
     mock_process.communicate.return_value = (b"stdout output", b"stderr output")
-    scheduler._running_processes = [mock_process]
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
 
     scheduler._reap_finished_processes()
 
@@ -135,7 +142,7 @@ def test_reap_finished_processes_failure_no_capture(
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.poll.return_value = 1
     mock_process.args = ["false"]
-    scheduler._running_processes = [mock_process]
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
 
     scheduler._reap_finished_processes()
 
@@ -152,11 +159,60 @@ def test_reap_finished_processes_keeps_running() -> None:
 
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.poll.return_value = None
-    scheduler._running_processes = [mock_process]
+    rp = RunningProcess(mock_process, time.monotonic(), None)
+    scheduler._running_processes = [rp]
 
     scheduler._reap_finished_processes()
 
-    assert scheduler._running_processes == [mock_process]
+    assert len(scheduler._running_processes) == 1
+    assert scheduler._running_processes[0].process is mock_process
+
+
+def test_reap_finished_processes_kills_when_max_runtime_exceeded(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes hard-kills the process group when max_runtime is exceeded."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.WARNING)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = None
+    mock_process.args = ["sleep", "9999"]
+    mock_process.pid = 4242
+    # start_time far in the past so elapsed >> max_runtime
+    rp = RunningProcess(mock_process, time.monotonic() - 120, max_runtime=60)
+    scheduler._running_processes = [rp]
+
+    with (
+        patch("scheduler_run.scheduler.os.getpgid", return_value=4242),
+        patch("scheduler_run.scheduler.os.killpg") as mock_killpg,
+    ):
+        scheduler._reap_finished_processes()
+
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
+        mock_process.wait.assert_called_once()
+        assert scheduler._running_processes == []
+        assert "max_runtime of 60s exceeded" in caplog.text
+        assert "sleep 9999" in caplog.text
+
+
+def test_reap_finished_processes_keeps_running_within_max_runtime() -> None:
+    """Test _reap_finished_processes does not kill a process within its max_runtime."""
+    scheduler = Scheduler()
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = None
+    mock_process.args = ["sleep", "10"]
+    # start_time just now, max_runtime is generous — should not be killed
+    rp = RunningProcess(mock_process, time.monotonic(), max_runtime=3600)
+    scheduler._running_processes = [rp]
+
+    with patch("scheduler_run.scheduler.os.killpg") as mock_killpg:
+        scheduler._reap_finished_processes()
+
+        mock_killpg.assert_not_called()
+        assert len(scheduler._running_processes) == 1
+        assert scheduler._running_processes[0].process is mock_process
 
 
 def test_run_system_command_not_found(caplog: pytest.LogCaptureFixture) -> None:
@@ -179,19 +235,28 @@ def test_terminate_running_processes(caplog: pytest.LogCaptureFixture) -> None:
     running = MagicMock(spec=subprocess.Popen)
     running.poll.return_value = None
     running.args = ["sleep", "60"]
+    running.pid = 1234
     finished = MagicMock(spec=subprocess.Popen)
     finished.poll.return_value = 0
     finished.args = ["true"]
-    scheduler._running_processes = [running, finished]
+    finished.pid = 5678
+    scheduler._running_processes = [
+        RunningProcess(running, time.monotonic(), None),
+        RunningProcess(finished, time.monotonic(), None),
+    ]
 
-    scheduler._terminate_running_processes()
+    with (
+        patch("scheduler_run.scheduler.os.getpgid", return_value=1234) as mock_getpgid,
+        patch("scheduler_run.scheduler.os.killpg") as mock_killpg,
+    ):
+        scheduler._terminate_running_processes()
 
-    running.terminate.assert_called_once()
-    finished.terminate.assert_not_called()
-    running.wait.assert_called()
-    assert scheduler._running_processes == []
-    assert "Terminating 2 running process(es)" in caplog.text
-    assert "Terminating process: sleep 60" in caplog.text
+        mock_getpgid.assert_called_with(running.pid)
+        mock_killpg.assert_called_with(1234, signal.SIGTERM)
+        running.wait.assert_called()
+        assert scheduler._running_processes == []
+        assert "Terminating 2 running process(es)" in caplog.text
+        assert "Terminating process: sleep 60" in caplog.text
 
 
 def test_terminate_running_processes_kills_on_timeout(
@@ -204,13 +269,55 @@ def test_terminate_running_processes_kills_on_timeout(
     stubborn = MagicMock(spec=subprocess.Popen)
     stubborn.poll.return_value = None
     stubborn.args = ["sleep", "60"]
+    stubborn.pid = 9999
     stubborn.wait.side_effect = [subprocess.TimeoutExpired("sleep", 5), None]
-    scheduler._running_processes = [stubborn]
+    scheduler._running_processes = [RunningProcess(stubborn, time.monotonic(), None)]
 
-    scheduler._terminate_running_processes()
+    with (
+        patch("scheduler_run.scheduler.os.getpgid", return_value=9999),
+        patch("scheduler_run.scheduler.os.killpg") as mock_killpg,
+    ):
+        scheduler._terminate_running_processes()
 
-    stubborn.kill.assert_called_once()
-    assert "Killing process: sleep 60" in caplog.text
+        mock_killpg.assert_any_call(9999, signal.SIGKILL)
+        assert "Killing process group: sleep 60" in caplog.text
+
+
+def test_kill_process_group_process_already_gone() -> None:
+    """Test _kill_process_group silently ignores ProcessLookupError (process already dead)."""
+    scheduler = Scheduler()
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.pid = 7777
+
+    with patch(
+        "scheduler_run.scheduler.os.getpgid", side_effect=ProcessLookupError
+    ):
+        # Should not raise even when the process no longer exists
+        scheduler._kill_process_group(mock_process)
+
+
+def test_terminate_running_processes_process_already_gone_on_sigterm(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _terminate_running_processes silently ignores ProcessLookupError on SIGTERM."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    vanished = MagicMock(spec=subprocess.Popen)
+    vanished.poll.return_value = None
+    vanished.args = ["sleep", "5"]
+    vanished.pid = 8888
+    scheduler._running_processes = [RunningProcess(vanished, time.monotonic(), None)]
+
+    with patch(
+        "scheduler_run.scheduler.os.getpgid", side_effect=ProcessLookupError
+    ):
+        # Should complete without raising, clearing the list
+        scheduler._terminate_running_processes()
+
+    assert scheduler._running_processes == []
+    assert "Terminating 1 running process(es)" in caplog.text
 
 
 def test_schedule_command_system_type(caplog: pytest.LogCaptureFixture) -> None:
@@ -1008,8 +1115,8 @@ def test_process_pending_queue_no_limit(caplog: pytest.LogCaptureFixture) -> Non
     caplog.set_level(logging.INFO)
 
     # Add commands to queue
-    scheduler._pending_queue.append(("system", "echo 'test1'"))
-    scheduler._pending_queue.append(("system", "echo 'test2'"))
+    scheduler._pending_queue.append(("system", "echo 'test1'", None))
+    scheduler._pending_queue.append(("system", "echo 'test2'", None))
 
     mock_process1 = MagicMock(spec=subprocess.Popen)
     mock_process1.poll.return_value = None
@@ -1037,7 +1144,7 @@ def test_process_pending_queue_unsupported_type_no_limit(
     caplog.set_level(logging.ERROR)
 
     # Add unsupported command type to queue
-    scheduler._pending_queue.append(("unsupported", "echo 'test'"))
+    scheduler._pending_queue.append(("unsupported", "echo 'test'", None))
 
     scheduler._process_pending_queue()
 
@@ -1055,7 +1162,7 @@ def test_process_pending_queue_unsupported_type_with_limit(
     caplog.set_level(logging.ERROR)
 
     # Add unsupported command type to queue
-    scheduler._pending_queue.append(("unsupported", "echo 'test'"))
+    scheduler._pending_queue.append(("unsupported", "echo 'test'", None))
 
     scheduler._process_pending_queue()
 
@@ -1074,12 +1181,12 @@ def test_process_pending_queue_with_limit(caplog: pytest.LogCaptureFixture) -> N
     mock_process1 = MagicMock(spec=subprocess.Popen)
     mock_process1.poll.return_value = None
     mock_process1.args = ["sleep", "10"]
-    scheduler._running_processes = [mock_process1]
+    scheduler._running_processes = [RunningProcess(mock_process1, time.monotonic(), None)]
 
     # Add 3 commands to queue
-    scheduler._pending_queue.append(("system", "echo 'test1'"))
-    scheduler._pending_queue.append(("system", "echo 'test2'"))
-    scheduler._pending_queue.append(("system", "echo 'test3'"))
+    scheduler._pending_queue.append(("system", "echo 'test1'", None))
+    scheduler._pending_queue.append(("system", "echo 'test2'", None))
+    scheduler._pending_queue.append(("system", "echo 'test3'", None))
 
     mock_process2 = MagicMock(spec=subprocess.Popen)
     mock_process2.poll.return_value = None

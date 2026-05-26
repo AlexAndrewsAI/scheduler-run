@@ -6,8 +6,10 @@ specified times.
 
 import datetime
 import logging
+import os
 import random
 import shlex
+import signal
 import subprocess
 import time
 from collections import deque
@@ -177,6 +179,21 @@ class JobRegistry:
         return list(self._jobs)
 
 
+class RunningProcess(NamedTuple):
+    """A tracked running subprocess with its metadata.
+
+    Attributes:
+        process: The underlying Popen object.
+        start_time: Monotonic clock value at process start.
+        max_runtime: Maximum allowed runtime in seconds, or None for no limit.
+
+    """
+
+    process: subprocess.Popen[bytes]
+    start_time: float
+    max_runtime: int | None
+
+
 class ScheduledCommand(NamedTuple):
     """A scheduled command with its execution details.
 
@@ -185,6 +202,7 @@ class ScheduledCommand(NamedTuple):
         command: The command to execute.
         time: The scheduled execution time in HH:MM:SS format.
         delay: The calculated random delay in seconds.
+        max_runtime: Maximum allowed runtime in seconds, or None for no limit.
 
     """
 
@@ -192,6 +210,7 @@ class ScheduledCommand(NamedTuple):
     command: str
     time: str
     delay: int
+    max_runtime: int | None
 
 
 class Scheduler:
@@ -217,8 +236,8 @@ class Scheduler:
             config = Config()
         self.config = config
         self.scheduled_commands: list[ScheduledCommand] = []
-        self._running_processes: list[subprocess.Popen[bytes]] = []
-        self._pending_queue: deque[tuple[str, str]] = deque()  # (command_type, command)
+        self._running_processes: list[RunningProcess] = []
+        self._pending_queue: deque[tuple[str, str, int | None]] = deque()  # (command_type, command, max_runtime)
         self._job_registry = JobRegistry()
 
         # Register the system command runner
@@ -226,20 +245,37 @@ class Scheduler:
 
     def _reap_finished_processes(self) -> None:
         """Remove finished child processes and log their exit status."""
-        still_running: list[subprocess.Popen[bytes]] = []
-        for process in self._running_processes:
-            return_code = process.poll()
+        still_running: list[RunningProcess] = []
+        now = time.monotonic()
+        for rp in self._running_processes:
+            # Enforce max_runtime: hard-kill the process group if exceeded
+            if rp.max_runtime is not None and rp.process.poll() is None:
+                elapsed = now - rp.start_time
+                if elapsed >= rp.max_runtime:
+                    command = self._process_command(rp.process)
+                    logger.warning(
+                        "max_runtime of %ss exceeded for command '%s' "
+                        "(elapsed %.1fs) — killing process group",
+                        rp.max_runtime,
+                        command,
+                        elapsed,
+                    )
+                    self._kill_process_group(rp.process)
+                    rp.process.wait()
+                    continue
+
+            return_code = rp.process.poll()
             if return_code is None:
-                still_running.append(process)
+                still_running.append(rp)
                 continue
-            command = self._process_command(process)
+            command = self._process_command(rp.process)
             if return_code == 0:
                 logger.info("Command completed: %s (exit %s)", command, return_code)
             else:
                 logger.error("Command failed: %s (exit %s)", command, return_code)
                 # Log captured output if available
                 if self.config.capture_output:
-                    stdout, stderr = process.communicate()
+                    stdout, stderr = rp.process.communicate()
                     if stdout:
                         logger.error(
                             "stdout: %s", stdout.decode(errors="replace").strip()
@@ -266,16 +302,16 @@ class Scheduler:
         if max_concurrent is None:
             # No limit, process all pending commands
             while self._pending_queue:
-                command_type, command = self._pending_queue.popleft()
+                command_type, command, max_runtime = self._pending_queue.popleft()
                 if command_type in COMMAND_RUNNERS:
-                    COMMAND_RUNNERS[command_type](command)
+                    COMMAND_RUNNERS[command_type](command, max_runtime=max_runtime)
                 else:
                     logger.error("Unsupported command type in queue: %s", command_type)
             return
 
         # Process as many as we can within the limit
         while self._pending_queue and len(self._running_processes) < max_concurrent:
-            command_type, command = self._pending_queue.popleft()
+            command_type, command, max_runtime = self._pending_queue.popleft()
             logger.info(
                 "Starting queued command: %s (running: %s/%s, queued: %s)",
                 command,
@@ -284,7 +320,7 @@ class Scheduler:
                 len(self._pending_queue),
             )
             if command_type in COMMAND_RUNNERS:
-                COMMAND_RUNNERS[command_type](command)
+                COMMAND_RUNNERS[command_type](command, max_runtime=max_runtime)
             else:
                 logger.error("Unsupported command type in queue: %s", command_type)
 
@@ -302,42 +338,69 @@ class Scheduler:
             return " ".join(str(part) for part in args)
         return str(args)
 
+    @staticmethod
+    def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
+        """Hard-kill the process group of a subprocess (SIGKILL).
+
+        Because all subprocesses are spawned with ``start_new_session=True``,
+        the child becomes its own session/process-group leader.  Sending
+        SIGKILL to the entire group therefore kills the child and all of its
+        descendants recursively.
+
+        Args:
+            process: The Popen object whose process group should be killed.
+
+        """
+        try:
+            pgid = os.getpgid(process.pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # Process already gone
+
     def _terminate_running_processes(self) -> None:
         """Terminate all child processes started by this scheduler."""
         if not self._running_processes:
             return
 
         logger.info("Terminating %s running process(es)", len(self._running_processes))
-        for process in self._running_processes:
-            if process.poll() is not None:
+        for rp in self._running_processes:
+            if rp.process.poll() is not None:
                 continue
-            command = self._process_command(process)
+            command = self._process_command(rp.process)
             logger.info("Terminating process: %s", command)
-            process.terminate()
+            try:
+                pgid = os.getpgid(rp.process.pid)
+                os.killpg(pgid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
 
         deadline = time.monotonic() + 5.0
-        for process in self._running_processes:
-            if process.poll() is not None:
+        for rp in self._running_processes:
+            if rp.process.poll() is not None:
                 continue
             remaining = max(0.0, deadline - time.monotonic())
             try:
-                process.wait(timeout=remaining)
+                rp.process.wait(timeout=remaining)
             except subprocess.TimeoutExpired:
-                command = self._process_command(process)
-                logger.warning("Killing process: %s", command)
-                process.kill()
-                process.wait()
+                command = self._process_command(rp.process)
+                logger.warning("Killing process group: %s", command)
+                self._kill_process_group(rp.process)
+                rp.process.wait()
 
         self._running_processes.clear()
 
-    def _run_system_command(self, command: str) -> None:
+    def _run_system_command(self, command: str, max_runtime: int | None = None) -> None:
         """Start a system command in a background subprocess.
 
         Commands run in parallel; the scheduler does not wait for completion
-        before running other scheduled tasks.
+        before running other scheduled tasks.  Each subprocess is started in
+        its own session (``start_new_session=True``) so that the entire
+        process group can be killed together when ``max_runtime`` is enforced.
 
         Args:
             command: The command to execute.
+            max_runtime: Maximum runtime in seconds before the process group
+                is hard-killed (SIGKILL).  None means no limit.
 
         """
         max_concurrent = self.config.max_concurrent
@@ -352,7 +415,7 @@ class Scheduler:
                 max_concurrent,
                 len(self._pending_queue) + 1,
             )
-            self._pending_queue.append(("system", command))
+            self._pending_queue.append(("system", command, max_runtime))
             return
 
         logger.info("Starting system command: %s", command)
@@ -363,18 +426,26 @@ class Scheduler:
                     args,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    start_new_session=True,
                 )
             else:
                 process = subprocess.Popen(  # noqa: S603
                     args,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    start_new_session=True,
                 )
         except FileNotFoundError as e:
             logger.error("Command not found: %s. Error: %s", command, e)
             return
 
-        self._running_processes.append(process)
+        self._running_processes.append(
+            RunningProcess(
+                process=process,
+                start_time=time.monotonic(),
+                max_runtime=max_runtime,
+            )
+        )
 
     def _calculate_actual_time(self, time_str: str, delay_seconds: int) -> str:
         """Calculate the actual start time including the random delay.
@@ -437,6 +508,7 @@ class Scheduler:
         delay: int = 0,
         repetitions: int = 0,
         interval: int = -1,
+        max_runtime: int | None = None,
     ) -> None:
         """Schedule a single command.
 
@@ -450,6 +522,8 @@ class Scheduler:
                 (only used when repetitions > 0). If -1 and repetitions > 0,
                 the interval is auto-calculated to spread runs evenly
                 throughout the day.
+            max_runtime: Maximum runtime in seconds before the process group is
+                hard-killed (SIGKILL).  None means no limit.
 
         Raises:
             ValueError: If the command type is not registered in COMMAND_RUNNERS.
@@ -504,9 +578,11 @@ class Scheduler:
             # Calculate actual time with delay
             actual_time = self._calculate_actual_time(base_time_str, actual_delay)
 
-            self._job_registry.schedule_daily(runner, actual_time, command)
+            self._job_registry.schedule_daily(
+                runner, actual_time, command, max_runtime=max_runtime
+            )
             self.scheduled_commands.append(
-                ScheduledCommand(command_type, command, actual_time, actual_delay)
+                ScheduledCommand(command_type, command, actual_time, actual_delay, max_runtime)
             )
             logger.info(
                 "Scheduled %s command '%s' (execution %s/%s) at %s "
@@ -538,7 +614,7 @@ class Scheduler:
 
         # Phase 1: Load and validate all YAML files (no progress logging yet)
         all_entries: list[ScheduleEntry] = []
-        seen_entries: set[tuple[str, str, str, int, int, int]] = set()
+        seen_entries: set[tuple[str, str, str, int, int, int, int | None]] = set()
         loaded_files: list[Path] = []
         duplicate_warnings: list[tuple[Path, ScheduleEntry]] = []
         allowed_duplicates: list[tuple[Path, ScheduleEntry]] = []
@@ -569,6 +645,7 @@ class Scheduler:
                             entry.delay,
                             entry.repetitions,
                             entry.interval,
+                            entry.max_runtime,
                         )
                         if entry_key in seen_entries:
                             if self.config.allow_duplicates:
@@ -648,18 +725,21 @@ class Scheduler:
                 delay=entry.delay,
                 repetitions=entry.repetitions,
                 interval=entry.interval,
+                max_runtime=entry.max_runtime,
             )
 
         # Log all scheduled commands
         logger.info("Scheduled commands:")
         for cmd in self.scheduled_commands:
             next_run = self._calculate_next_run(cmd.time)
+            max_rt_str = f"{cmd.max_runtime}s" if cmd.max_runtime is not None else "none"
             logger.info(
-                "%s • %s • %s • delay: %ss",
+                "%s • %s • %s • delay: %ss • max_runtime: %s",
                 cmd.command_type,
                 cmd.command,
                 next_run,
                 cmd.delay,
+                max_rt_str,
             )
 
     def run(self) -> None:

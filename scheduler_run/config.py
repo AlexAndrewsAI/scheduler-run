@@ -12,7 +12,8 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Registry of command runners: maps command type to execution function
-COMMAND_RUNNERS: dict[str, Callable[[str], None]] = {}
+# Typed as Callable[..., None] to allow optional keyword arguments (e.g. max_runtime)
+COMMAND_RUNNERS: dict[str, Callable[..., None]] = {}
 
 
 # Placeholder for system runner - will be registered by Scheduler.__init__
@@ -169,6 +170,14 @@ class ScheduleEntry(BaseModel):
             "evenly throughout the day: 24*3600 / (repetitions + 1)"
         ),
     )
+    max_runtime: int | None = Field(
+        default=None,
+        description=(
+            "Maximum runtime in seconds for the job. Once a launched job hits "
+            "this runtime, it and all child processes are recursively hard killed "
+            "(SIGKILL). Defaults to None (no limit)."
+        ),
+    )
 
     model_config = {"title": "Schedule Entry", "frozen": True}
 
@@ -251,6 +260,25 @@ class ScheduleEntry(BaseModel):
                 f"Unsupported command type: '{v}'. "
                 f"Supported types: {supported_types_str}"
             )
+        return v
+
+    @field_validator("max_runtime")
+    @classmethod
+    def validate_max_runtime_positive(cls, v: int | None) -> int | None:
+        """Validate that max_runtime is positive if set.
+
+        Args:
+            v: The max_runtime value to validate.
+
+        Returns:
+            The validated max_runtime.
+
+        Raises:
+            ValueError: If max_runtime is not a positive integer.
+
+        """
+        if v is not None and v <= 0:
+            raise ValueError("max_runtime must be a positive integer (seconds)")
         return v
 
     @field_validator("delay")

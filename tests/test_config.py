@@ -120,6 +120,52 @@ def test_schedule_entry_repetitions_negative() -> None:
         ScheduleEntry(type="system", command="echo test", time="14:30", repetitions=-5)
 
 
+def test_schedule_entry_max_runtime_valid() -> None:
+    """Test ScheduleEntry with valid max_runtime values."""
+    # Default should be None (no limit)
+    entry_default = ScheduleEntry(type="system", command="echo test", time="14:30")
+    assert entry_default.max_runtime is None
+
+    # Explicit None should also be accepted
+    entry_none = ScheduleEntry(
+        type="system", command="echo test", time="14:30", max_runtime=None
+    )
+    assert entry_none.max_runtime is None
+
+    # Positive integers should be accepted
+    entry_60 = ScheduleEntry(
+        type="system", command="echo test", time="14:30", max_runtime=60
+    )
+    assert entry_60.max_runtime == 60
+
+    entry_1 = ScheduleEntry(
+        type="system", command="echo test", time="14:30", max_runtime=1
+    )
+    assert entry_1.max_runtime == 1
+
+
+def test_schedule_entry_max_runtime_invalid() -> None:
+    """Test ScheduleEntry rejects zero and negative max_runtime values."""
+    with pytest.raises(
+        ValueError, match="max_runtime must be a positive integer"
+    ):
+        ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=0)
+
+    with pytest.raises(
+        ValueError, match="max_runtime must be a positive integer"
+    ):
+        ScheduleEntry(
+            type="system", command="echo test", time="14:30", max_runtime=-1
+        )
+
+    with pytest.raises(
+        ValueError, match="max_runtime must be a positive integer"
+    ):
+        ScheduleEntry(
+            type="system", command="echo test", time="14:30", max_runtime=-3600
+        )
+
+
 def test_schedule_entry_interval_valid() -> None:
     """Test ScheduleEntry with valid interval."""
     entry = ScheduleEntry(

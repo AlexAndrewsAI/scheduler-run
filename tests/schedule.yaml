@@ -11,5 +11,7 @@ schedules:
   time: '10:00'
   repetitions: 1
   interval: 3600
-
-
+- type: system
+  command: echo 'with max runtime'
+  time: '12:00'
+  max_runtime: 300
