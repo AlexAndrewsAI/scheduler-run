@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 """Convert CSV schedule file to YAML format.
 
-This script converts a CSV file with columns: type, command, time, delay, repetitions, interval
-to a YAML file with the equivalent structure.
+This script converts a CSV file with columns: type, command, time, delay,
+repetitions, interval to a YAML file with the equivalent structure.
 """
 
 import argparse
 import csv
 import logging
+import sys
 from pathlib import Path
 
 import yaml
+from pydantic import ValidationError
+
+# Add parent directory to path to import scheduler_run module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from scheduler_run.config import ScheduleEntry
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -33,7 +40,9 @@ def _parse_optional_int(row: dict, key: str, default: int) -> int:
         try:
             return int(value_str)
         except ValueError:
-            logger.warning(f"Invalid {key} value '{value_str}', using default {default}")
+            logger.warning(
+                "Invalid %s value '%s', using default %s", key, value_str, default
+            )
             return default
     return default
 
@@ -46,14 +55,15 @@ def convert_csv_to_yaml(csv_path: Path, yaml_path: Path) -> None:
         yaml_path: Path to the output YAML file.
 
     """
-    logger.info(f"Reading CSV from {csv_path}")
+    logger.info("Reading CSV from %s", csv_path)
 
     schedules = []
+    validation_errors = 0
 
     try:
         with open(csv_path, newline="") as csvfile:
             reader = csv.DictReader(csvfile)
-            for row in reader:
+            for row_num, row in enumerate(reader, start=1):
                 entry = {
                     "type": row.get("type", "").strip(),
                     "command": row.get("command", "").strip(),
@@ -76,30 +86,46 @@ def convert_csv_to_yaml(csv_path: Path, yaml_path: Path) -> None:
                     interval = _parse_optional_int(row, "interval", -1)
                     entry["interval"] = interval
 
-                if entry["type"] and entry["command"] and entry["time"]:
-                    schedules.append(entry)
-                else:
-                    logger.warning(f"Skipping incomplete row: {row}")
+                # Validate using ScheduleEntry
+                try:
+                    validated_entry = ScheduleEntry(**entry)  # type: ignore[arg-type]
+                    schedules.append(validated_entry.model_dump())
+                except ValidationError as e:
+                    validation_errors += 1
+                    logger.error("Row %s: Validation failed - %s", row_num, e)
+                except ValueError as e:
+                    validation_errors += 1
+                    logger.error("Row %s: Validation failed - %s", row_num, e)
     except FileNotFoundError:
-        logger.error(f"CSV file not found: {csv_path}")
+        logger.error("CSV file not found: %s", csv_path)
         raise
     except csv.Error as e:
-        logger.error(f"CSV parsing error: {e}")
+        logger.error("CSV parsing error: %s", e)
         raise
 
     yaml_data = {"schedules": schedules}
 
-    logger.info(f"Writing YAML to {yaml_path}")
+    logger.info("Writing YAML to %s", yaml_path)
     yaml_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(yaml_path, "w") as yamlfile:
         yaml.dump(yaml_data, yamlfile, default_flow_style=False, sort_keys=False)
 
-    logger.info(f"Successfully converted {len(schedules)} schedule entries")
+    logger.info(
+        "Successfully converted %s schedule entries (%s validation errors)",
+        len(schedules),
+        validation_errors,
+    )
+
+    if validation_errors > 0:
+        logger.warning(
+            "%s row(s) failed validation and were not included in the output",
+            validation_errors,
+        )
 
 
 def main() -> None:
-    """Main entry point for the conversion script."""
+    """Run the conversion script."""
     parser = argparse.ArgumentParser(
         description="Convert CSV schedule file to YAML format"
     )

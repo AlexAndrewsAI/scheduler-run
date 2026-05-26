@@ -28,8 +28,22 @@ def test_convert_csv_to_yaml_basic(
         data = yaml.safe_load(f)
 
     assert data["schedules"] == [
-        {"type": "system", "command": "echo 'hello'", "time": "14:10"},
-        {"type": "system", "command": "echo 'goodbye'", "time": "15:00"},
+        {
+            "type": "system",
+            "command": "echo 'hello'",
+            "time": "14:10",
+            "delay": 0,
+            "repetitions": 0,
+            "interval": -1,
+        },
+        {
+            "type": "system",
+            "command": "echo 'goodbye'",
+            "time": "15:00",
+            "delay": 0,
+            "repetitions": 0,
+            "interval": -1,
+        },
     ]
     assert "Successfully converted 2 schedule entries" in caplog.text
 
@@ -80,11 +94,11 @@ def test_convert_csv_missing_optional_fields(tmp_path: Path) -> None:
     with open(yaml_file) as f:
         data = yaml.safe_load(f)
 
-    # Optional fields should not be present in output
+    # Optional fields are now included with default values from ScheduleEntry
     entry = data["schedules"][0]
-    assert "delay" not in entry
-    assert "repetitions" not in entry
-    assert "interval" not in entry
+    assert entry["delay"] == 0
+    assert entry["repetitions"] == 0
+    assert entry["interval"] == -1
 
 
 def test_convert_csv_empty_optional_fields(tmp_path: Path) -> None:
@@ -100,11 +114,11 @@ def test_convert_csv_empty_optional_fields(tmp_path: Path) -> None:
     with open(yaml_file) as f:
         data = yaml.safe_load(f)
 
-    # Empty optional fields should not be present in output
+    # Empty optional fields are now included with default values from ScheduleEntry
     entry = data["schedules"][0]
-    assert "delay" not in entry
-    assert "repetitions" not in entry
-    assert "interval" not in entry
+    assert entry["delay"] == 0
+    assert entry["repetitions"] == 0
+    assert entry["interval"] == -1
 
 
 def test_convert_csv_invalid_delay(
@@ -185,7 +199,7 @@ def test_convert_csv_incomplete_row(
 
     convert_csv_to_yaml(csv_file, yaml_file)
 
-    assert "Skipping incomplete row" in caplog.text
+    assert "Validation failed" in caplog.text
     with open(yaml_file) as f:
         data = yaml.safe_load(f)
 

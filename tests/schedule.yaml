@@ -4,7 +4,7 @@ schedules:
   time: '08:00'
 - type: system
   command: echo 'with delay'
-  time: '09:00'
+  time: '23:00'
   delay: 30
 - type: system
   command: echo 'with repetition'

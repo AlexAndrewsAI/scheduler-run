@@ -4,11 +4,28 @@ Provides configuration management using Pydantic models.
 """
 
 import re
-from collections.abc import Sequence
+import shlex
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Registry of command runners: maps command type to execution function
+COMMAND_RUNNERS: dict[str, Callable[[str], None]] = {}
+
+
+# Placeholder for system runner - will be registered by Scheduler.__init__
+# This ensures the registry is never empty during validation
+def _system_runner_placeholder(_command: str) -> None:
+    """Raise error if system command runner is not registered."""
+    raise RuntimeError(
+        "System command runner not registered. "
+        "Initialize a Scheduler instance before using system commands."
+    )
+
+
+COMMAND_RUNNERS["system"] = _system_runner_placeholder
 
 
 class Config(BaseModel):
@@ -21,6 +38,13 @@ class Config(BaseModel):
             validator; use the :attr:`yaml_paths` property for typed access.
         allow_duplicates: Whether to allow duplicate schedule entries.
             If False (default), duplicate entries are detected and skipped.
+        max_concurrent: Maximum number of concurrent subprocesses to run.
+            If None (default), there is no limit. If set to a positive integer,
+            the scheduler will queue commands when the limit is reached and
+            start them as slots become available.
+        capture_output: Whether to capture stdout/stderr from subprocesses.
+            If True (default), output is captured and logged on failure.
+            If False, output is discarded (subprocess.DEVNULL).
 
     """
 
@@ -31,6 +55,14 @@ class Config(BaseModel):
     allow_duplicates: bool = Field(
         default=False,
         description="Whether to allow duplicate schedule entries",
+    )
+    max_concurrent: int | None = Field(
+        default=5,
+        description="Maximum number of concurrent subprocesses to run",
+    )
+    capture_output: bool = Field(
+        default=True,
+        description="Whether to capture stdout/stderr from subprocesses",
     )
 
     model_config = {"title": "Scheduler Config", "frozen": True}
@@ -47,6 +79,10 @@ class Config(BaseModel):
         Returns:
             A list of Path objects derived from ``yaml_path``.
 
+        Raises:
+            TypeError: If the underlying yaml_path has an unexpected type.
+                This can occur when using model_construct to bypass validators.
+
         """
         v = self.yaml_path
         # The field_validator already runs mode="before", so at runtime v is
@@ -58,7 +94,11 @@ class Config(BaseModel):
             return [v]
         if isinstance(v, list):
             return [Path(item) if isinstance(item, str) else item for item in v]
-        return [Path("schedule.yaml")]  # unreachable, but makes mypy happy
+        raise TypeError(
+            f"Invalid type for yaml_path: {type(v)}. "
+            "Use Config() constructor with proper validation "
+            "instead of model_construct."
+        )
 
     @field_validator("yaml_path", mode="before")
     @classmethod
@@ -102,7 +142,7 @@ class ScheduleEntry(BaseModel):
     """
 
     type: str = Field(description="The type of command (e.g., 'system')")
-    command: str = Field(description="The command to execute")
+    command: str = Field(description="The command to execute (string or list of args)")
     time: str = Field(
         description=(
             "The time to run the command in 24h format (H:MM or HH:MM), "
@@ -153,6 +193,22 @@ class ScheduleEntry(BaseModel):
             )
         return v
 
+    @field_validator("command", mode="before")
+    @classmethod
+    def normalize_command(cls, v: str | list[str]) -> str:
+        """Normalize command to string format.
+
+        Args:
+            v: The command as string or list of args.
+
+        Returns:
+            The command as a string.
+
+        """
+        if isinstance(v, list):
+            return shlex.join(v)
+        return v
+
     @field_validator("command")
     @classmethod
     def validate_command_not_empty(cls, v: str) -> str:
@@ -189,9 +245,8 @@ class ScheduleEntry(BaseModel):
         """
         if not v.strip():
             raise ValueError("Type cannot be empty")
-        supported_types = {"system"}
-        if v not in supported_types:
-            supported_types_str = ", ".join(sorted(supported_types))
+        if v not in COMMAND_RUNNERS:
+            supported_types_str = ", ".join(sorted(COMMAND_RUNNERS.keys()))
             raise ValueError(
                 f"Unsupported command type: '{v}'. "
                 f"Supported types: {supported_types_str}"

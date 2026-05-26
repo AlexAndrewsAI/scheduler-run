@@ -10,18 +10,171 @@ import random
 import shlex
 import subprocess
 import time
-from typing import NamedTuple
+from collections import deque
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any, NamedTuple
 
-import schedule
 import yaml
 from pydantic import ValidationError
 
-from scheduler_run.config import Config, ScheduleEntry
+from scheduler_run.config import COMMAND_RUNNERS, Config, ScheduleEntry
 
 logger = logging.getLogger(__name__)
 
 # Constants for delay randomization
 DELAY_SIGMA_MULTIPLIER = 0.15  # 15% standard deviation for delay randomization
+
+
+class Job:
+    """A scheduled job with execution details.
+
+    Attributes:
+        func: The function to execute.
+        args: Positional arguments to pass to the function.
+        kwargs: Keyword arguments to pass to the function.
+        target_time_str: The target execution time in HH:MM:SS format.
+        last_run: The datetime when this job was last run.
+        next_run: The datetime when this job should next run.
+
+    """
+
+    def __init__(
+        self,
+        func: Callable[..., None],
+        target_time_str: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize a Job instance.
+
+        Args:
+            func: The function to execute.
+            target_time_str: The target execution time in HH:MM:SS format.
+            *args: Positional arguments to pass to the function.
+            **kwargs: Keyword arguments to pass to the function.
+
+        """
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        self.target_time_str = target_time_str
+        self.last_run: datetime.datetime | None = None
+        self.next_run: datetime.datetime = self._calculate_next_run()
+
+    def _calculate_next_run(self) -> datetime.datetime:
+        """Calculate the next run datetime for this job.
+
+        Returns:
+            The next execution datetime.
+
+        """
+        now = datetime.datetime.now()
+        parts = self.target_time_str.split(":")
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = int(parts[2]) if len(parts) > 2 else 0
+
+        target_dt = now.replace(
+            hour=hours, minute=minutes, second=seconds, microsecond=0
+        )
+        if target_dt <= now:
+            target_dt += datetime.timedelta(days=1)
+
+        return target_dt
+
+    def should_run(self, now: datetime.datetime) -> bool:
+        """Check if the job should run at the given time.
+
+        Args:
+            now: The current datetime.
+
+        Returns:
+            True if the job should run, False otherwise.
+
+        """
+        # If last_run was on a previous day, recalculate next_run based on last_run
+        if self.last_run is not None:
+            # Calculate what today's target time would be
+            parts = self.target_time_str.split(":")
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = int(parts[2]) if len(parts) > 2 else 0
+
+            today_target = now.replace(
+                hour=hours, minute=minutes, second=seconds, microsecond=0
+            )
+
+            # If last_run was before today's target time and now is after it,
+            # the job should run
+            if self.last_run.date() < now.date() and now >= today_target:
+                return True
+
+        return now >= self.next_run
+
+    def run(self) -> None:
+        """Execute the job."""
+        self.func(*self.args, **self.kwargs)
+        self.last_run = datetime.datetime.now()
+        self.next_run = self._calculate_next_run()
+
+
+class JobRegistry:
+    """A registry for managing scheduled jobs.
+
+    This registry is owned by a Scheduler instance and avoids the global
+    state issues of the schedule package.
+    """
+
+    def __init__(self) -> None:
+        """Initialize an empty JobRegistry."""
+        self._jobs: list[Job] = []
+
+    def schedule_daily(
+        self,
+        func: Callable[..., None],
+        time_str: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Job:
+        """Schedule a function to run daily at a specific time.
+
+        Args:
+            func: The function to execute.
+            time_str: The time to run in HH:MM format.
+            *args: Positional arguments to pass to the function.
+            **kwargs: Keyword arguments to pass to the function.
+
+        Returns:
+            The created Job instance.
+
+        """
+        # Convert HH:MM to HH:MM:SS
+        parts = time_str.split(":")
+        if len(parts) == 2:
+            time_str = f"{time_str}:00"
+
+        job = Job(func, time_str, *args, **kwargs)
+        self._jobs.append(job)
+        return job
+
+    def clear(self) -> None:
+        """Clear all jobs from the registry."""
+        self._jobs.clear()
+
+    def run_pending(self) -> None:
+        """Run all jobs that are due to run."""
+        now = datetime.datetime.now()
+        for job in self._jobs:
+            if job.should_run(now):
+                try:
+                    job.run()
+                except Exception as e:
+                    logger.error("Job execution failed: %s", e)
+
+    def get_jobs(self) -> list[Job]:
+        """Return a copy of the jobs list."""
+        return list(self._jobs)
 
 
 class ScheduledCommand(NamedTuple):
@@ -47,6 +200,8 @@ class Scheduler:
     Reads a YAML file with a list of schedule entries, each containing:
     type, command, and time fields.
     Schedules each command to run daily at the specified time.
+    Commands run in parallel as background subprocesses; stopping the
+    scheduler (for example with Ctrl+C) terminates any still-running children.
     Currently only type "system" is supported.
     """
 
@@ -62,22 +217,164 @@ class Scheduler:
             config = Config()
         self.config = config
         self.scheduled_commands: list[ScheduledCommand] = []
+        self._running_processes: list[subprocess.Popen[bytes]] = []
+        self._pending_queue: deque[tuple[str, str]] = deque()  # (command_type, command)
+        self._job_registry = JobRegistry()
+
+        # Register the system command runner
+        COMMAND_RUNNERS["system"] = self._run_system_command
+
+    def _reap_finished_processes(self) -> None:
+        """Remove finished child processes and log their exit status."""
+        still_running: list[subprocess.Popen[bytes]] = []
+        for process in self._running_processes:
+            return_code = process.poll()
+            if return_code is None:
+                still_running.append(process)
+                continue
+            command = self._process_command(process)
+            if return_code == 0:
+                logger.info("Command completed: %s (exit %s)", command, return_code)
+            else:
+                logger.error("Command failed: %s (exit %s)", command, return_code)
+                # Log captured output if available
+                if self.config.capture_output:
+                    stdout, stderr = process.communicate()
+                    if stdout:
+                        logger.error(
+                            "stdout: %s", stdout.decode(errors="replace").strip()
+                        )
+                    if stderr:
+                        logger.error(
+                            "stderr: %s", stderr.decode(errors="replace").strip()
+                        )
+                    logger.warning(
+                        "Command '%s' failed with exit code %s. "
+                        "Check the logs above for output details.",
+                        command,
+                        return_code,
+                    )
+        self._running_processes = still_running
+        self._process_pending_queue()
+
+    def _process_pending_queue(self) -> None:
+        """Process pending commands from the queue when slots are available."""
+        if not self._pending_queue:
+            return
+
+        max_concurrent = self.config.max_concurrent
+        if max_concurrent is None:
+            # No limit, process all pending commands
+            while self._pending_queue:
+                command_type, command = self._pending_queue.popleft()
+                if command_type in COMMAND_RUNNERS:
+                    COMMAND_RUNNERS[command_type](command)
+                else:
+                    logger.error("Unsupported command type in queue: %s", command_type)
+            return
+
+        # Process as many as we can within the limit
+        while self._pending_queue and len(self._running_processes) < max_concurrent:
+            command_type, command = self._pending_queue.popleft()
+            logger.info(
+                "Starting queued command: %s (running: %s/%s, queued: %s)",
+                command,
+                len(self._running_processes) + 1,
+                max_concurrent,
+                len(self._pending_queue),
+            )
+            if command_type in COMMAND_RUNNERS:
+                COMMAND_RUNNERS[command_type](command)
+            else:
+                logger.error("Unsupported command type in queue: %s", command_type)
+
+    @staticmethod
+    def _process_command(process: subprocess.Popen[bytes]) -> str:
+        """Return a human-readable command string for a tracked process."""
+        args = process.args
+        if args is None:
+            return "<unknown>"
+        if isinstance(args, str):
+            return args
+        if isinstance(args, (bytes, bytearray)):
+            return args.decode(errors="replace")
+        if isinstance(args, Sequence):
+            return " ".join(str(part) for part in args)
+        return str(args)
+
+    def _terminate_running_processes(self) -> None:
+        """Terminate all child processes started by this scheduler."""
+        if not self._running_processes:
+            return
+
+        logger.info("Terminating %s running process(es)", len(self._running_processes))
+        for process in self._running_processes:
+            if process.poll() is not None:
+                continue
+            command = self._process_command(process)
+            logger.info("Terminating process: %s", command)
+            process.terminate()
+
+        deadline = time.monotonic() + 5.0
+        for process in self._running_processes:
+            if process.poll() is not None:
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                command = self._process_command(process)
+                logger.warning("Killing process: %s", command)
+                process.kill()
+                process.wait()
+
+        self._running_processes.clear()
 
     def _run_system_command(self, command: str) -> None:
-        """Run a system command.
+        """Start a system command in a background subprocess.
+
+        Commands run in parallel; the scheduler does not wait for completion
+        before running other scheduled tasks.
 
         Args:
             command: The command to execute.
 
         """
-        logger.info("Running system command: %s", command)
+        max_concurrent = self.config.max_concurrent
+        if (
+            max_concurrent is not None
+            and len(self._running_processes) >= max_concurrent
+        ):
+            logger.info(
+                "Throttling: queuing command '%s' (running: %s/%s, queued: %s)",
+                command,
+                len(self._running_processes),
+                max_concurrent,
+                len(self._pending_queue) + 1,
+            )
+            self._pending_queue.append(("system", command))
+            return
+
+        logger.info("Starting system command: %s", command)
         try:
             args = shlex.split(command)
-            subprocess.run(args, check=True)  # noqa: S603
+            if self.config.capture_output:
+                process = subprocess.Popen(  # noqa: S603
+                    args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            else:
+                process = subprocess.Popen(  # noqa: S603
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
         except FileNotFoundError as e:
             logger.error("Command not found: %s. Error: %s", command, e)
-        except subprocess.CalledProcessError as e:
-            logger.error("Command failed: %s. Error: %s", command, e)
+            return
+
+        self._running_processes.append(process)
 
     def _calculate_actual_time(self, time_str: str, delay_seconds: int) -> str:
         """Calculate the actual start time including the random delay.
@@ -144,7 +441,7 @@ class Scheduler:
         """Schedule a single command.
 
         Args:
-            command_type: The type of command (currently only "system" supported).
+            command_type: The type of command (e.g., "system").
             command: The command to execute.
             time_str: The time to run the command in 24h format (e.g., "14:10").
             delay: Optional base delay in seconds.
@@ -154,68 +451,72 @@ class Scheduler:
                 the interval is auto-calculated to spread runs evenly
                 throughout the day.
 
+        Raises:
+            ValueError: If the command type is not registered in COMMAND_RUNNERS.
+
         """
-        if command_type == "system":
-            # Auto-calculate interval if -1 and repetitions > 0
-            if interval == -1 and repetitions > 0:
-                interval = (24 * 3600) // (repetitions + 1)
-                logger.info(
-                    "Auto-calculated interval: %ss to spread %s executions "
-                    "evenly throughout the day",
-                    interval,
-                    repetitions + 1,
-                )
-
-            # Calculate the number of executions (1 + repetitions)
-            num_executions = 1 + repetitions
-
-            for i in range(num_executions):
-                # Recalculate delay for each repetition
-                if delay > 0:
-                    actual_delay = max(
-                        0,
-                        int(
-                            random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
-                        ),
-                    )
-                else:
-                    actual_delay = 0
-
-                # Calculate the base time for this execution
-                if i == 0:
-                    base_time_str = time_str
-                else:
-                    # Add interval to the previous execution time
-                    parts = time_str.split(":")
-                    hours = int(parts[0])
-                    minutes = int(parts[1])
-                    total_seconds = hours * 3600 + minutes * 60 + (i * interval)
-                    total_seconds = total_seconds % (24 * 3600)
-                    h = total_seconds // 3600
-                    m = (total_seconds % 3600) // 60
-                    base_time_str = f"{h:02d}:{m:02d}"
-
-                # Calculate actual time with delay
-                actual_time = self._calculate_actual_time(base_time_str, actual_delay)
-
-                schedule.every().day.at(actual_time).do(
-                    self._run_system_command, command
-                )
-                self.scheduled_commands.append(
-                    ScheduledCommand(command_type, command, actual_time, actual_delay)
-                )
-                logger.info(
-                    "Scheduled system command '%s' (execution %s/%s) at %s "
-                    "with calculated delay %ss",
-                    command,
-                    i + 1,
-                    num_executions,
-                    actual_time,
-                    actual_delay,
-                )
-        else:
+        if command_type not in COMMAND_RUNNERS:
+            supported_types_str = ", ".join(sorted(COMMAND_RUNNERS.keys()))
             raise ValueError(
-                f"Unsupported command type: {command_type}. Supported types: system"
+                f"Unsupported command type: {command_type}. "
+                f"Supported types: {supported_types_str}"
+            )
+
+        runner = COMMAND_RUNNERS[command_type]
+
+        # Auto-calculate interval if -1 and repetitions > 0
+        if interval == -1 and repetitions > 0:
+            interval = (24 * 3600) // (repetitions + 1)
+            logger.info(
+                "Auto-calculated interval: %ss to spread %s executions "
+                "evenly throughout the day",
+                interval,
+                repetitions + 1,
+            )
+
+        # Calculate the number of executions (1 + repetitions)
+        num_executions = 1 + repetitions
+
+        for i in range(num_executions):
+            # Recalculate delay for each repetition
+            if delay > 0:
+                actual_delay = max(
+                    0,
+                    int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
+                )
+            else:
+                actual_delay = 0
+
+            # Calculate the base time for this execution
+            if i == 0:
+                base_time_str = time_str
+            else:
+                # Add interval to the previous execution time
+                parts = time_str.split(":")
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                total_seconds = hours * 3600 + minutes * 60 + (i * interval)
+                total_seconds = total_seconds % (24 * 3600)
+                h = total_seconds // 3600
+                m = (total_seconds % 3600) // 60
+                base_time_str = f"{h:02d}:{m:02d}"
+
+            # Calculate actual time with delay
+            actual_time = self._calculate_actual_time(base_time_str, actual_delay)
+
+            self._job_registry.schedule_daily(runner, actual_time, command)
+            self.scheduled_commands.append(
+                ScheduledCommand(command_type, command, actual_time, actual_delay)
+            )
+            logger.info(
+                "Scheduled %s command '%s' (execution %s/%s) at %s "
+                "with calculated delay %ss",
+                command_type,
+                command,
+                i + 1,
+                num_executions,
+                actual_time,
+                actual_delay,
             )
 
     def load_schedule(self) -> None:
@@ -230,18 +531,19 @@ class Scheduler:
         2. Schedule all validated entries in one pass
 
         If any file fails to load or validate, no changes are made to the
-        scheduled commands.
+        scheduled commands. Progress logging is deferred until all files
+        are successfully validated to avoid misleading partial state on failure.
         """
         yaml_paths = self.config.yaml_paths
-        logger.info("Loading schedule from %s YAML file(s)", len(yaml_paths))
 
-        # Phase 1: Load and validate all YAML files
+        # Phase 1: Load and validate all YAML files (no progress logging yet)
         all_entries: list[ScheduleEntry] = []
         seen_entries: set[tuple[str, str, str, int, int, int]] = set()
+        loaded_files: list[Path] = []
+        duplicate_warnings: list[tuple[Path, ScheduleEntry]] = []
+        allowed_duplicates: list[tuple[Path, ScheduleEntry]] = []
 
         for yaml_path in yaml_paths:
-            logger.info("Loading schedule from %s", yaml_path)
-
             try:
                 with open(yaml_path, encoding="utf-8") as yamlfile:
                     data = yaml.safe_load(yamlfile)
@@ -250,82 +552,92 @@ class Scheduler:
                             f"Invalid YAML format in {yaml_path}: "
                             "missing 'schedules' key"
                         )
-                        logger.error("%s", error_msg)
                         raise ValueError(error_msg)
 
                     for entry_data in data["schedules"]:
-                        try:
-                            if not isinstance(entry_data, dict):
-                                error_msg = (
-                                    f"Invalid entry in {yaml_path}: expected dict, "
-                                    f"got {type(entry_data).__name__}: {entry_data}"
-                                )
-                                logger.error("%s", error_msg)
-                                raise ValueError(error_msg)
-                            entry = ScheduleEntry(**entry_data)
-                            entry_key = (
-                                entry.type,
-                                entry.command,
-                                entry.time,
-                                entry.delay,
-                                entry.repetitions,
-                                entry.interval,
-                            )
-                            if entry_key in seen_entries:
-                                if self.config.allow_duplicates:
-                                    logger.info(
-                                        "Allowing duplicate entry in %s: "
-                                        "type='%s', command='%s', time='%s', "
-                                        "delay=%s, repetitions=%s, interval=%s",
-                                        yaml_path,
-                                        entry.type,
-                                        entry.command,
-                                        entry.time,
-                                        entry.delay,
-                                        entry.repetitions,
-                                        entry.interval,
-                                    )
-                                    all_entries.append(entry)
-                                else:
-                                    logger.warning(
-                                        "Duplicate entry detected in %s: "
-                                        "type='%s', command='%s', time='%s', "
-                                        "delay=%s, repetitions=%s, interval=%s. "
-                                        "Use allow_duplicates=True or "
-                                        "--allow-duplicates to permit.",
-                                        yaml_path,
-                                        entry.type,
-                                        entry.command,
-                                        entry.time,
-                                        entry.delay,
-                                        entry.repetitions,
-                                        entry.interval,
-                                    )
-                            else:
-                                seen_entries.add(entry_key)
-                                all_entries.append(entry)
-                        except ValidationError as e:
+                        if not isinstance(entry_data, dict):
                             error_msg = (
-                                f"Invalid entry in {yaml_path}: {entry_data}. "
-                                f"Error: {e}"
+                                f"Invalid entry in {yaml_path}: expected dict, "
+                                f"got {type(entry_data).__name__}: {entry_data}"
                             )
-                            logger.error("%s", error_msg)
-                            raise
+                            raise ValueError(error_msg)
+                        entry = ScheduleEntry(**entry_data)
+                        entry_key = (
+                            entry.type,
+                            entry.command,
+                            entry.time,
+                            entry.delay,
+                            entry.repetitions,
+                            entry.interval,
+                        )
+                        if entry_key in seen_entries:
+                            if self.config.allow_duplicates:
+                                all_entries.append(entry)
+                                # Defer logging until after validation succeeds
+                                allowed_duplicates.append((yaml_path, entry))
+                            else:
+                                # Defer warning logging until after validation succeeds
+                                duplicate_warnings.append((yaml_path, entry))
+                        else:
+                            seen_entries.add(entry_key)
+                            all_entries.append(entry)
+                    loaded_files.append(yaml_path)
             except FileNotFoundError:
-                logger.error("YAML file not found: %s", yaml_path)
+                error_msg = f"YAML file not found: {yaml_path}"
+                logger.error("%s", error_msg)
                 raise
             except PermissionError:
-                logger.error("Permission denied reading YAML file: %s", yaml_path)
+                error_msg = f"Permission denied reading YAML file: {yaml_path}"
+                logger.error("%s", error_msg)
                 raise
             except yaml.YAMLError as e:
-                logger.error("YAML parsing error in %s: %s", yaml_path, e)
+                error_msg = f"YAML parsing error in {yaml_path}: {e}"
+                logger.error("%s", error_msg)
                 raise
-            except (KeyError, ValueError) as e:
-                logger.error("Invalid YAML data in %s: %s", yaml_path, e)
+            except (KeyError, ValueError, ValidationError) as e:
+                error_msg = f"Invalid entry in {yaml_path}: {e}"
+                logger.error("%s", error_msg)
                 raise
 
+        # All files validated successfully - now log progress
+        logger.info("Loading schedule from %s YAML file(s)", len(loaded_files))
+        for yaml_path in loaded_files:
+            logger.info("Loading schedule from %s", yaml_path)
+
+        # Log allowed duplicates (deferred from validation phase)
+        for yaml_path, entry in allowed_duplicates:
+            logger.info(
+                "Allowing duplicate entry in %s: "
+                "type='%s', command='%s', time='%s', "
+                "delay=%s, repetitions=%s, interval=%s",
+                yaml_path,
+                entry.type,
+                entry.command,
+                entry.time,
+                entry.delay,
+                entry.repetitions,
+                entry.interval,
+            )
+
+        # Log duplicate warnings (deferred from validation phase)
+        for yaml_path, entry in duplicate_warnings:
+            logger.warning(
+                "Duplicate entry detected in %s: "
+                "type='%s', command='%s', time='%s', "
+                "delay=%s, repetitions=%s, interval=%s. "
+                "Use allow_duplicates=True or "
+                "--allow-duplicates to permit.",
+                yaml_path,
+                entry.type,
+                entry.command,
+                entry.time,
+                entry.delay,
+                entry.repetitions,
+                entry.interval,
+            )
+
         # Phase 2: Clear and schedule all validated entries
-        schedule.clear()
+        self._job_registry.clear()
         self.scheduled_commands.clear()
 
         for entry in all_entries:
@@ -361,7 +673,10 @@ class Scheduler:
         logger.info("Scheduler started. Press Ctrl+C to stop.")
         try:
             while True:
-                schedule.run_pending()
+                self._job_registry.run_pending()
+                self._reap_finished_processes()
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("Scheduler stopped by user")
+        finally:
+            self._terminate_running_processes()

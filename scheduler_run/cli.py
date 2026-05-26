@@ -37,6 +37,11 @@ def main(
         "--allow-duplicates",
         help="Allow duplicate schedule entries",
     ),
+    max_concurrent: int | None = typer.Option(
+        5,
+        "--max-concurrent",
+        help="Maximum number of concurrent subprocesses to run (default: 5)",
+    ),
     version: bool | None = typer.Option(
         None,
         "--version",
@@ -65,6 +70,8 @@ def main(
         files: List of paths to YAML files containing scheduled commands.
             If not provided, defaults to schedule.yaml in the current directory.
         allow_duplicates: When True, duplicate schedule entries are scheduled twice.
+        max_concurrent: Maximum number of concurrent subprocesses to run.
+            Defaults to 5. Set to None for unlimited.
         version: Eager flag handled by version_callback; not used in the body.
 
     """
@@ -80,7 +87,11 @@ def main(
     if not files:
         files = [Path("schedule.yaml")]
 
-    config = Config(yaml_path=files, allow_duplicates=allow_duplicates)
+    config = Config(
+        yaml_path=files,
+        allow_duplicates=allow_duplicates,
+        max_concurrent=max_concurrent,
+    )
     scheduler = Scheduler(config)
     scheduler.run()
 

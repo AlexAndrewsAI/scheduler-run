@@ -15,7 +15,7 @@ This is a command scheduler that reads commands from a YAML file and executes th
 - Dependency management with **uv**
 - Command scheduling with the **schedule** library
 
-The scheduler reads a YAML file with entries containing: `type`, `command`, and `time`, and runs each command daily at the specified time.
+The scheduler reads a YAML file with entries containing: `type`, `command`, and `time`, and runs each command daily at the specified time. Scheduled commands run in parallel as background processes; when you stop the scheduler (Ctrl+C), any still-running commands are terminated.
 
 ## Installation
 
@@ -84,6 +84,12 @@ uv run scheduler-run schedule1.yaml schedule2.yaml
 # Allow duplicate schedule entries
 uv run scheduler-run --allow-duplicates schedule.yaml
 
+# Limit concurrent subprocesses (prevents resource exhaustion, default: 5)
+uv run scheduler-run --max-concurrent 10 schedule.yaml
+
+# Set unlimited concurrent subprocesses
+uv run scheduler-run --max-concurrent null schedule.yaml
+
 # Show version
 uv run scheduler-run --version
 
@@ -102,7 +108,7 @@ To test the scheduler with the example schedule.yaml file:
 uv run scheduler-run tests/schedule.yaml
 ```
 
-The scheduler will load the commands from the YAML file and run them at the specified times. Press Ctrl+C to stop the scheduler.
+The scheduler will load the commands from the YAML file and run them at the specified times. Commands that overlap in time run in parallel. Press Ctrl+C to stop the scheduler; any commands still running are terminated.
 
 ### Python API
 
@@ -112,11 +118,19 @@ You can also use the scheduler programmatically:
 from scheduler_run.scheduler import Scheduler
 from scheduler_run.config import Config
 
-# Create a scheduler with default config
+# Create a scheduler with default config (max_concurrent=5)
 scheduler = Scheduler()
 
 # Or with custom config
 config = Config(yaml_path="path/to/schedule.yaml")
+scheduler = Scheduler(config)
+
+# Or with custom max_concurrent limit
+config = Config(yaml_path="path/to/schedule.yaml", max_concurrent=10)
+scheduler = Scheduler(config)
+
+# Or with unlimited concurrent subprocesses
+config = Config(yaml_path="path/to/schedule.yaml", max_concurrent=None)
 scheduler = Scheduler(config)
 
 # Run the scheduler (blocks indefinitely)
@@ -189,6 +203,9 @@ scheduler-run/
 - **Testing**: Comprehensive test suite with pytest
 - **Code quality**: Automated linting with ruff and type checking with mypy
 - **Flexible scheduling**: Uses the schedule library for reliable task execution
+- **Parallel execution**: Overlapping scheduled commands run concurrently as subprocesses
+- **Concurrency limiting**: Built-in max_concurrent limit (default: 5) prevents resource exhaustion by queuing commands when the limit is reached
+- **Clean shutdown**: Stopping the scheduler terminates any child processes still running
 
 ## Security Considerations
 
