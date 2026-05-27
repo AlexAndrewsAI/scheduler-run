@@ -28,6 +28,33 @@ logger = logging.getLogger(__name__)
 DELAY_SIGMA_MULTIPLIER = 0.15  # 15% standard deviation for delay randomization
 
 
+def _parse_time_to_next_run(target_time_str: str, now: datetime.datetime | None = None) -> datetime.datetime:
+    """Calculate the next run datetime for a given target time string.
+
+    Args:
+        target_time_str: The target execution time in HH:MM:SS format.
+        now: Optional current datetime (for testing). Defaults to datetime.now().
+
+    Returns:
+        The next execution datetime. If the target time has already passed today,
+        returns the target time for tomorrow.
+
+    """
+    if now is None:
+        now = datetime.datetime.now()
+
+    parts = target_time_str.split(":")
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    seconds = int(parts[2]) if len(parts) > 2 else 0
+
+    target_dt = now.replace(hour=hours, minute=minutes, second=seconds, microsecond=0)
+    if target_dt <= now:
+        target_dt += datetime.timedelta(days=1)
+
+    return target_dt
+
+
 class Job:
     """A scheduled job with execution details.
 
@@ -71,19 +98,7 @@ class Job:
             The next execution datetime.
 
         """
-        now = datetime.datetime.now()
-        parts = self.target_time_str.split(":")
-        hours = int(parts[0])
-        minutes = int(parts[1])
-        seconds = int(parts[2]) if len(parts) > 2 else 0
-
-        target_dt = now.replace(
-            hour=hours, minute=minutes, second=seconds, microsecond=0
-        )
-        if target_dt <= now:
-            target_dt += datetime.timedelta(days=1)
-
-        return target_dt
+        return _parse_time_to_next_run(self.target_time_str)
 
     def should_run(self, now: datetime.datetime) -> bool:
         """Check if the job should run at the given time.
@@ -488,7 +503,7 @@ class Scheduler:
     def _calculate_next_run(
         self, target_time_str: str, now: datetime.datetime | None = None
     ) -> str:
-        """Calculate the next run date and time.
+        """Calculate the next run date and time for display purposes.
 
         Args:
             target_time_str: The target execution time in HH:MM:SS format.
@@ -498,20 +513,7 @@ class Scheduler:
             The next execution datetime as a string in YYYY-MM-DD HH:MM:SS format.
 
         """
-        if now is None:
-            now = datetime.datetime.now()
-
-        parts = target_time_str.split(":")
-        hours = int(parts[0])
-        minutes = int(parts[1])
-        seconds = int(parts[2]) if len(parts) > 2 else 0
-
-        target_dt = now.replace(
-            hour=hours, minute=minutes, second=seconds, microsecond=0
-        )
-        if target_dt <= now:
-            target_dt += datetime.timedelta(days=1)
-
+        target_dt = _parse_time_to_next_run(target_time_str, now)
         return target_dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def _schedule_command(
