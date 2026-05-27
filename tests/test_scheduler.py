@@ -13,7 +13,7 @@ import yaml
 from pydantic import ValidationError
 
 from scheduler_run.config import Config
-from scheduler_run.scheduler import RunningProcess, Scheduler
+from scheduler_run.scheduler import RunningProcess, Scheduler, _expand_variables
 
 
 def test_scheduler_init_default_config() -> None:
@@ -1727,3 +1727,229 @@ def test_job_registry_run_pending_exception_handling(
     # Verify error was logged
     assert "Job execution failed" in caplog.text
     assert "Test error" in caplog.text
+
+
+def test_expand_variables_single_variable() -> None:
+    """Test _expand_variables with a single variable."""
+    command = "echo {num}"
+    variables = {"num": [1, 2, 3]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 3
+    assert result[0] == ("echo 1", {"num": 1})
+    assert result[1] == ("echo 2", {"num": 2})
+    assert result[2] == ("echo 3", {"num": 3})
+
+
+def test_expand_variables_multiple_variables() -> None:
+    """Test _expand_variables with multiple variables (Cartesian product)."""
+    command = "echo {num}-{letter}"
+    variables = {"num": [1, 2], "letter": ["a", "b"]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 4
+    # Cartesian product order depends on sorted variable names
+    # Since we sort used_vars, 'letter' comes before 'num'
+    # So the order is: (a,1), (a,2), (b,1), (b,2)
+    expected_results = [
+        ("echo 1-a", {"letter": "a", "num": 1}),
+        ("echo 2-a", {"letter": "a", "num": 2}),
+        ("echo 1-b", {"letter": "b", "num": 1}),
+        ("echo 2-b", {"letter": "b", "num": 2}),
+    ]
+    assert result == expected_results
+
+
+def test_expand_variables_string_values() -> None:
+    """Test _expand_variables with string variable values."""
+    command = "echo {name}"
+    variables = {"name": ["alice", "bob"]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 2
+    assert result[0] == ("echo alice", {"name": "alice"})
+    assert result[1] == ("echo bob", {"name": "bob"})
+
+
+def test_expand_variables_float_values() -> None:
+    """Test _expand_variables with float variable values."""
+    command = "echo {value}"
+    variables = {"value": [1.5, 2.5]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 2
+    assert result[0] == ("echo 1.5", {"value": 1.5})
+    assert result[1] == ("echo 2.5", {"value": 2.5})
+
+
+def test_expand_variables_mixed_types() -> None:
+    """Test _expand_variables with mixed type variable values."""
+    command = "echo {value}"
+    variables = {"value": [1, "two", 3.5]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 3
+    assert result[0] == ("echo 1", {"value": 1})
+    assert result[1] == ("echo two", {"value": "two"})
+    assert result[2] == ("echo 3.5", {"value": 3.5})
+
+
+def test_expand_variables_undefined_variable() -> None:
+    """Test _expand_variables raises error for undefined variable in command."""
+    command = "echo {undefined}"
+    variables = {"num": [1, 2, 3]}
+
+    with pytest.raises(ValueError, match="Undefined variables in command"):
+        _expand_variables(command, variables)
+
+
+def test_expand_variables_no_variables_in_command() -> None:
+    """Test _expand_variables when command has no variable placeholders."""
+    command = "echo hello"
+    variables = {"num": [1, 2, 3]}
+
+    result = _expand_variables(command, variables)
+
+    # Should return one result with the original command and first variable value
+    assert len(result) == 1
+    assert result[0] == ("echo hello", {"num": 1})
+
+
+def test_schedule_command_with_variables(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _schedule_command with variables."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    scheduler._schedule_command(
+        "system",
+        "echo {num}",
+        "14:30",
+        variables={"num": [1, 2, 3]},
+        interval=60,
+    )
+
+    # Should schedule 3 times (one for each variable value)
+    assert len(scheduler.scheduled_commands) == 3
+    assert len(scheduler._job_registry.get_jobs()) == 3
+
+    # Verify each execution was logged
+    assert "(execution 1/3, vars:" in caplog.text
+    assert "(execution 2/3, vars:" in caplog.text
+    assert "(execution 3/3, vars:" in caplog.text
+
+
+def test_schedule_command_with_variables_auto_interval(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _schedule_command with variables and auto-calculated interval."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    # 3 values should auto-calculate interval to 24*3600/4 = 21600 seconds
+    scheduler._schedule_command(
+        "system",
+        "echo {num}",
+        "00:00",
+        variables={"num": [1, 2, 3]},
+        interval=-1,
+    )
+
+    # Should schedule 3 times
+    assert len(scheduler.scheduled_commands) == 3
+
+    # Verify auto-calculation was logged
+    assert "Auto-calculated interval: 21600s" in caplog.text
+    assert "spread 4 executions evenly throughout the day" in caplog.text
+
+
+def test_load_schedule_with_variables(tmp_path: Path) -> None:
+    """Test load_schedule with an entry that includes variables."""
+    yaml_file = tmp_path / "variables_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: 'echo Number: {num}'\n"
+        "    time: '14:10'\n"
+        "    variables:\n"
+        "      num: [1, 2, 3]\n"
+        "    interval: 60\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+
+    scheduler.load_schedule()
+
+    # Should schedule 3 times (one for each variable value)
+    assert len(scheduler.scheduled_commands) == 3
+    assert len(scheduler._job_registry.get_jobs()) == 3
+
+    # Verify commands were expanded
+    commands = [cmd.command for cmd in scheduler.scheduled_commands]
+    assert "echo Number: 1" in commands
+    assert "echo Number: 2" in commands
+    assert "echo Number: 3" in commands
+
+
+def test_load_schedule_with_variables_multiple(tmp_path: Path) -> None:
+    """Test load_schedule with multiple variables (Cartesian product)."""
+    yaml_file = tmp_path / "variables_multiple_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo {num}-{letter}\n"
+        "    time: '14:10'\n"
+        "    variables:\n"
+        "      num: [1, 2]\n"
+        "      letter: [a, b]\n"
+        "    interval: 60\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+
+    scheduler.load_schedule()
+
+    # Should schedule 4 times (Cartesian product: 2 * 2)
+    assert len(scheduler.scheduled_commands) == 4
+    assert len(scheduler._job_registry.get_jobs()) == 4
+
+    # Verify commands were expanded
+    commands = [cmd.command for cmd in scheduler.scheduled_commands]
+    assert "echo 1-a" in commands
+    assert "echo 1-b" in commands
+    assert "echo 2-a" in commands
+    assert "echo 2-b" in commands
+
+
+def test_load_schedule_variables_and_repetitions_conflict(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule rejects both variables and repetitions."""
+    yaml_file = tmp_path / "conflict_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo 'test'\n"
+        "    time: '14:30'\n"
+        "    variables:\n"
+        "      num: [1, 2, 3]\n"
+        "    repetitions: 2\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with pytest.raises(ValidationError, match="Cannot use both"):
+        scheduler.load_schedule()
+
+    assert "Invalid entry" in caplog.text
+    # Verify no commands were scheduled due to atomicity
+    assert len(scheduler._job_registry.get_jobs()) == 0
+    assert len(scheduler.scheduled_commands) == 0

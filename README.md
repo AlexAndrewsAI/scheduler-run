@@ -43,8 +43,9 @@ Create a YAML file with a `schedules` key containing a list of entries:
 - `command`: The command to execute
 - `time`: The time to run the command in 24-hour H:MM or HH:MM format (e.g., "14:10" or "9:00"). Single-digit hours are accepted and normalised to zero-padded HH:MM on load.
 - `delay`: The base delay in seconds (optional, defaults to 0). If specified, a random start delay is calculated based on a gaussian distribution: `max(0, int(random.gauss(mu=delay, sigma=0.15 * delay)))`
-- `repetitions`: Number of times to repeat the command (optional, defaults to 0). If greater than 0, the command will run `repetitions + 1` times total.
-- `interval`: Time offset in seconds from the base time for each repetition (optional, defaults to -1). Only used when `repetitions > 0`. The timing for repetition `i` is calculated as `base_time + (i * interval) + delay_i`, where `delay_i` is a random delay recalculated for each execution. If set to -1 and `repetitions > 0`, the interval is auto-calculated to spread runs evenly throughout the day: `24*3600 / (repetitions + 1)`
+- `variables`: Variable mappings for pattern expansion (optional). If provided, the command will be expanded for each combination of variable values using Cartesian product. Variables are substituted using f-string style syntax (e.g., `{num}`). Replaces the deprecated `repetitions` field.
+- `repetitions`: [DEPRECATED] Number of times to repeat the command (optional, defaults to 0). Use `variables` instead for pattern-based expansion.
+- `interval`: Time offset in seconds from the base time for each repetition (optional, defaults to -1). Only used when `repetitions > 0` or `variables` is set. The timing for repetition `i` is calculated as `base_time + (i * interval) + delay_i`, where `delay_i` is a random delay recalculated for each execution. If set to -1 and `repetitions > 0` or `variables` is set, the interval is auto-calculated to spread runs evenly throughout the day: `24*3600 / (num_executions + 1)`
 
 Example `schedule.yaml`:
 ```yaml
@@ -61,11 +62,53 @@ schedules:
     command: echo 'good night'
     time: '22:00'
   - type: system
-    command: echo 'repeated task'
-    time: '09:00'
-    repetitions: 3
+    command: echo 'Number: {num}'
+    time: '10:00'
+    variables:
+      num: [1, 2, 3]
+    interval: 3600
+  - type: system
+    command: echo '{num}-{letter}'
+    time: '11:00'
+    variables:
+      num: [1, 2]
+      letter: [a, b]
+    interval: 1800
+```
+
+### Variable Expansion
+
+The `variables` field allows you to generate multiple runs from a single schedule entry using pattern expansion:
+
+- **Single variable**: Generate runs for each value in a list
+- **Multiple variables**: Generate runs for each combination using Cartesian product
+- **Variable substitution**: Use f-string style syntax `{variable_name}` in commands
+- **Interval spacing**: The `interval` field controls the time between different variable combinations
+
+Example with single variable:
+```yaml
+schedules:
+  - type: system
+    command: echo 'Number: {num}'
+    time: '10:00'
+    variables:
+      num: [1, 2, 3]
     interval: 3600
 ```
+This generates 3 runs at 10:00, 11:00, and 12:00 with commands `echo 'Number: 1'`, `echo 'Number: 2'`, and `echo 'Number: 3'`.
+
+Example with multiple variables (Cartesian product):
+```yaml
+schedules:
+  - type: system
+    command: echo '{num}-{letter}'
+    time: '10:00'
+    variables:
+      num: [1, 2]
+      letter: [a, b]
+    interval: 1800
+```
+This generates 4 runs (2 × 2 Cartesian product) at 10:00, 10:30, 11:00, and 11:30 with commands `echo '1-a'`, `echo '1-b'`, `echo '2-a'`, and `echo '2-b'`.
 
 ### Command Line Interface
 

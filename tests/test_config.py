@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from scheduler_run.config import COMMAND_RUNNERS, Config, ScheduleEntry
 
@@ -426,3 +427,183 @@ def test_schedule_entry_unsupported_type_uses_registry() -> None:
     # Restore original registry
     COMMAND_RUNNERS.clear()
     COMMAND_RUNNERS.update(original_registry)
+
+
+def test_schedule_entry_variables_valid() -> None:
+    """Test ScheduleEntry with valid variables."""
+    entry = ScheduleEntry(
+        type="system",
+        command="echo {num}",
+        time="14:30",
+        variables={"num": [1, 2, 3]},
+    )
+    assert entry.variables == {"num": [1, 2, 3]}
+
+    # Default variables should be None
+    entry_default = ScheduleEntry(type="system", command="echo test", time="14:30")
+    assert entry_default.variables is None
+
+
+def test_schedule_entry_variables_multiple() -> None:
+    """Test ScheduleEntry with multiple variables."""
+    entry = ScheduleEntry(
+        type="system",
+        command="echo {num}-{letter}",
+        time="14:30",
+        variables={"num": [1, 2], "letter": ["a", "b"]},
+    )
+    assert entry.variables == {"num": [1, 2], "letter": ["a", "b"]}
+
+
+def test_schedule_entry_variables_string_values() -> None:
+    """Test ScheduleEntry with string variable values."""
+    entry = ScheduleEntry(
+        type="system",
+        command="echo {name}",
+        time="14:30",
+        variables={"name": ["alice", "bob"]},
+    )
+    assert entry.variables == {"name": ["alice", "bob"]}
+
+
+def test_schedule_entry_variables_float_values() -> None:
+    """Test ScheduleEntry with float variable values."""
+    entry = ScheduleEntry(
+        type="system",
+        command="echo {value}",
+        time="14:30",
+        variables={"value": [1.5, 2.5, 3.5]},
+    )
+    assert entry.variables == {"value": [1.5, 2.5, 3.5]}
+
+
+def test_schedule_entry_variables_mixed_types() -> None:
+    """Test ScheduleEntry with mixed type variable values."""
+    entry = ScheduleEntry(
+        type="system",
+        command="echo {value}",
+        time="14:30",
+        variables={"value": [1, "two", 3.5]},
+    )
+    assert entry.variables == {"value": [1, "two", 3.5]}
+
+
+def test_schedule_entry_variables_invalid_not_dict() -> None:
+    """Test ScheduleEntry rejects variables that is not a dict."""
+    with pytest.raises(ValidationError, match="Input should be a valid dictionary"):
+        ScheduleEntry(
+            type="system",
+            command="echo test",
+            time="14:30",
+            variables="not a dict",  # type: ignore[arg-type]
+        )
+
+
+def test_schedule_entry_variables_invalid_key_not_string() -> None:
+    """Test ScheduleEntry rejects variables with non-string keys."""
+    with pytest.raises(ValidationError, match="Input should be a valid string"):
+        ScheduleEntry(
+            type="system",
+            command="echo test",
+            time="14:30",
+            variables={123: [1, 2, 3]},  # type: ignore[dict-item]
+        )
+
+
+def test_schedule_entry_variables_invalid_values_not_list() -> None:
+    """Test ScheduleEntry rejects variables with non-list values."""
+    with pytest.raises(ValidationError, match="Input should be a valid list"):
+        ScheduleEntry(
+            type="system",
+            command="echo test",
+            time="14:30",
+            variables={"num": "not a list"},  # type: ignore[dict-item]
+        )
+
+
+def test_schedule_entry_variables_invalid_empty_list() -> None:
+    """Test ScheduleEntry rejects variables with empty value lists."""
+    with pytest.raises(ValueError, match="Variable values for 'num' cannot be empty"):
+        ScheduleEntry(
+            type="system",
+            command="echo test",
+            time="14:30",
+            variables={"num": []},
+        )
+
+
+def test_schedule_entry_variables_invalid_value_type() -> None:
+    """Test ScheduleEntry rejects variables with invalid value types."""
+    with pytest.raises(ValidationError, match="Input should be a valid number"):
+        ScheduleEntry(
+            type="system",
+            command="echo test",
+            time="14:30",
+            variables={"num": [1, 2, {"invalid": "dict"}]},  # type: ignore[dict-item]
+        )
+
+
+def test_schedule_entry_variables_and_repetitions_conflict() -> None:
+    """Test ScheduleEntry rejects both variables and repetitions set."""
+    with pytest.raises(
+        ValueError, match="Cannot use both 'variables' and 'repetitions'"
+    ):
+        ScheduleEntry(
+            type="system",
+            command="echo test",
+            time="14:30",
+            variables={"num": [1, 2, 3]},
+            repetitions=2,
+        )
+
+
+def test_schedule_entry_interval_zero_with_variables() -> None:
+    """Test ScheduleEntry with interval=0 and variables raises error."""
+    with pytest.raises(ValueError, match="Interval cannot be 0 when variables is set"):
+        ScheduleEntry(
+            type="system",
+            command="echo {num}",
+            time="14:30",
+            variables={"num": [1, 2, 3]},
+            interval=0,
+        )
+
+
+def test_schedule_entry_interval_negative_with_variables() -> None:
+    """Test ScheduleEntry rejects negative interval when variables is set."""
+    with pytest.raises(
+        ValueError,
+        match="Interval cannot be negative \\(except -1\\) when variables is set",
+    ):
+        ScheduleEntry(
+            type="system",
+            command="echo {num}",
+            time="14:30",
+            variables={"num": [1, 2, 3]},
+            interval=-5,
+        )
+
+
+def test_schedule_entry_interval_valid_with_variables() -> None:
+    """Test ScheduleEntry with valid interval and variables combinations."""
+    # interval=-1 with variables (auto-calculation)
+    entry1 = ScheduleEntry(
+        type="system",
+        command="echo {num}",
+        time="14:30",
+        variables={"num": [1, 2, 3]},
+        interval=-1,
+    )
+    assert entry1.interval == -1
+    assert entry1.variables == {"num": [1, 2, 3]}
+
+    # interval>0 with variables
+    entry2 = ScheduleEntry(
+        type="system",
+        command="echo {num}",
+        time="14:30",
+        variables={"num": [1, 2, 3]},
+        interval=60,
+    )
+    assert entry2.interval == 60
+    assert entry2.variables == {"num": [1, 2, 3]}

@@ -33,6 +33,7 @@ def test_convert_csv_to_yaml_basic(
             "command": "echo 'hello'",
             "time": "14:10",
             "delay": 0,
+            "variables": None,
             "repetitions": 0,
             "interval": -1,
             "max_runtime": None,
@@ -42,6 +43,7 @@ def test_convert_csv_to_yaml_basic(
             "command": "echo 'goodbye'",
             "time": "15:00",
             "delay": 0,
+            "variables": None,
             "repetitions": 0,
             "interval": -1,
             "max_runtime": None,
@@ -71,6 +73,7 @@ def test_convert_csv_with_optional_fields(tmp_path: Path) -> None:
             "command": "echo 'hello'",
             "time": "14:10",
             "delay": 10,
+            "variables": None,
             "repetitions": 3,
             "interval": 3600,
             "max_runtime": None,
@@ -80,6 +83,7 @@ def test_convert_csv_with_optional_fields(tmp_path: Path) -> None:
             "command": "echo 'goodbye'",
             "time": "15:00",
             "delay": 0,
+            "variables": None,
             "repetitions": 0,
             "interval": -1,
             "max_runtime": None,
@@ -101,6 +105,7 @@ def test_convert_csv_missing_optional_fields(tmp_path: Path) -> None:
     # Optional fields are now included with default values from ScheduleEntry
     entry = data["schedules"][0]
     assert entry["delay"] == 0
+    assert entry["variables"] is None
     assert entry["repetitions"] == 0
     assert entry["interval"] == -1
 
@@ -121,6 +126,7 @@ def test_convert_csv_empty_optional_fields(tmp_path: Path) -> None:
     # Empty optional fields are now included with default values from ScheduleEntry
     entry = data["schedules"][0]
     assert entry["delay"] == 0
+    assert entry["variables"] is None
     assert entry["repetitions"] == 0
     assert entry["interval"] == -1
 

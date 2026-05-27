@@ -5,9 +5,11 @@ specified times.
 """
 
 import datetime
+import itertools
 import logging
 import os
 import random
+import re
 import shlex
 import signal
 import subprocess
@@ -26,6 +28,57 @@ logger = logging.getLogger(__name__)
 
 # Constants for delay randomization
 DELAY_SIGMA_MULTIPLIER = 0.15  # 15% standard deviation for delay randomization
+
+
+def _expand_variables(
+    command: str, variables: dict[str, list[str | int | float]]
+) -> list[tuple[str, dict[str, str | int | float]]]:
+    """Expand a command using variable mappings with Cartesian product.
+
+    Args:
+        command: The command template with variable placeholders (e.g., '{num}').
+        variables: A dictionary mapping variable names to lists of values.
+
+    Returns:
+        A list of (expanded_command, variable_mapping) tuples for each
+        combination of variable values.
+
+    """
+    # Extract variable names from the command
+    pattern = r"\{(\w+)\}"
+    used_vars = set(re.findall(pattern, command))
+
+    # If no variables are used in the command, return a single expansion
+    # with the first value of each variable (for backward compatibility)
+    if not used_vars:
+        var_mapping = {k: v[0] if v else None for k, v in variables.items()}
+        return [(command, var_mapping)]
+
+    # Validate that all referenced variables are defined
+    undefined_vars = used_vars - set(variables.keys())
+    if undefined_vars:
+        raise ValueError(
+            f"Undefined variables in command: {', '.join(sorted(undefined_vars))}. "
+            f"Defined variables: {', '.join(sorted(variables.keys()))}"
+        )
+
+    # Get the variable names in a consistent order (only used variables)
+    var_names = sorted(used_vars)
+    var_values = [variables[name] for name in var_names]
+
+    # Compute Cartesian product
+    expanded_commands: list[tuple[str, dict[str, str | int | float]]] = []
+    for combination in itertools.product(*var_values):
+        var_mapping = dict(zip(var_names, combination))
+        try:
+            expanded_command = command.format(**var_mapping)
+        except (KeyError, ValueError) as e:
+            raise ValueError(
+                f"Failed to substitute variables in command '{command}': {e}"
+            )
+        expanded_commands.append((expanded_command, var_mapping))
+
+    return expanded_commands
 
 
 def _parse_time_to_next_run(
@@ -534,6 +587,7 @@ class Scheduler:
         repetitions: int = 0,
         interval: int = -1,
         max_runtime: int | None = None,
+        variables: dict[str, list[str | int | float]] | None = None,
     ) -> None:
         """Schedule a single command.
 
@@ -543,12 +597,15 @@ class Scheduler:
             time_str: The time to run the command in 24h format (e.g., "14:10").
             delay: Optional base delay in seconds.
             repetitions: Number of times to repeat the command (0 means no repetition).
+                Deprecated: use variables instead.
             interval: Time in seconds between repetitions
-                (only used when repetitions > 0). If -1 and repetitions > 0,
-                the interval is auto-calculated to spread runs evenly
-                throughout the day.
+                (only used when repetitions > 0 or variables is set). If -1 and
+                repetitions > 0 or variables is set, the interval is auto-calculated
+                to spread runs evenly throughout the day.
             max_runtime: Maximum runtime in seconds before the process group is
                 hard-killed (SIGKILL).  None means no limit.
+            variables: Variable mappings for pattern expansion. If provided, the command
+                will be expanded for each combination of variable values.
 
         Raises:
             ValueError: If the command type is not registered in the instance registry.
@@ -563,64 +620,128 @@ class Scheduler:
 
         runner = self._command_runners[command_type]
 
-        # Auto-calculate interval if -1 and repetitions > 0
-        if interval == -1 and repetitions > 0:
-            interval = (24 * 3600) // (repetitions + 1)
-            logger.info(
-                "Auto-calculated interval: %ss to spread %s executions "
-                "evenly throughout the day",
-                interval,
-                repetitions + 1,
-            )
+        # Handle variable expansion
+        if variables is not None:
+            # Expand command using variables
+            expanded_commands = _expand_variables(command, variables)
+            num_executions = len(expanded_commands)
 
-        # Calculate the number of executions (1 + repetitions)
-        num_executions = 1 + repetitions
-
-        for i in range(num_executions):
-            # Recalculate delay for each repetition
-            if delay > 0:
-                actual_delay = max(
-                    0,
-                    int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
+            # Auto-calculate interval if -1
+            if interval == -1:
+                interval = (24 * 3600) // (num_executions + 1)
+                logger.info(
+                    "Auto-calculated interval: %ss to spread %s executions "
+                    "evenly throughout the day",
+                    interval,
+                    num_executions + 1,
                 )
-            else:
-                actual_delay = 0
 
-            # Calculate the base time for this execution
-            if i == 0:
-                base_time_str = time_str
-            else:
-                # Add interval to the previous execution time
-                parts = time_str.split(":")
-                hours = int(parts[0])
-                minutes = int(parts[1])
-                total_seconds = hours * 3600 + minutes * 60 + (i * interval)
-                total_seconds = total_seconds % (24 * 3600)
-                h = total_seconds // 3600
-                m = (total_seconds % 3600) // 60
-                base_time_str = f"{h:02d}:{m:02d}"
+            for i, (expanded_command, var_mapping) in enumerate(expanded_commands):
+                # Recalculate delay for each execution
+                if delay > 0:
+                    actual_delay = max(
+                        0,
+                        int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
+                    )
+                else:
+                    actual_delay = 0
 
-            # Calculate actual time with delay
-            actual_time = self._calculate_actual_time(base_time_str, actual_delay)
+                # Calculate the base time for this execution
+                if i == 0:
+                    base_time_str = time_str
+                else:
+                    # Add interval to the previous execution time
+                    parts = time_str.split(":")
+                    hours = int(parts[0])
+                    minutes = int(parts[1])
+                    total_seconds = hours * 3600 + minutes * 60 + (i * interval)
+                    total_seconds = total_seconds % (24 * 3600)
+                    h = total_seconds // 3600
+                    m = (total_seconds % 3600) // 60
+                    base_time_str = f"{h:02d}:{m:02d}"
 
-            self._job_registry.schedule_daily(
-                runner, actual_time, command, max_runtime=max_runtime
-            )
-            self.scheduled_commands.append(
-                ScheduledCommand(
-                    command_type, command, actual_time, actual_delay, max_runtime
+                # Calculate actual time with delay
+                actual_time = self._calculate_actual_time(base_time_str, actual_delay)
+
+                self._job_registry.schedule_daily(
+                    runner, actual_time, expanded_command, max_runtime=max_runtime
                 )
-            )
-            logger.info(
-                "Scheduled %s command '%s' (execution %s/%s) at %s "
-                "with calculated delay %ss",
-                command_type,
-                command,
-                i + 1,
-                num_executions,
-                actual_time,
-                actual_delay,
-            )
+                self.scheduled_commands.append(
+                    ScheduledCommand(
+                        command_type, expanded_command, actual_time, actual_delay, max_runtime
+                    )
+                )
+                logger.info(
+                    "Scheduled %s command '%s' (execution %s/%s, vars: %s) at %s "
+                    "with calculated delay %ss",
+                    command_type,
+                    expanded_command,
+                    i + 1,
+                    num_executions,
+                    var_mapping,
+                    actual_time,
+                    actual_delay,
+                )
+        else:
+            # Use existing repetitions logic for backward compatibility
+            # Auto-calculate interval if -1 and repetitions > 0
+            if interval == -1 and repetitions > 0:
+                interval = (24 * 3600) // (repetitions + 1)
+                logger.info(
+                    "Auto-calculated interval: %ss to spread %s executions "
+                    "evenly throughout the day",
+                    interval,
+                    repetitions + 1,
+                )
+
+            # Calculate the number of executions (1 + repetitions)
+            num_executions = 1 + repetitions
+
+            for i in range(num_executions):
+                # Recalculate delay for each repetition
+                if delay > 0:
+                    actual_delay = max(
+                        0,
+                        int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
+                    )
+                else:
+                    actual_delay = 0
+
+                # Calculate the base time for this execution
+                if i == 0:
+                    base_time_str = time_str
+                else:
+                    # Add interval to the previous execution time
+                    parts = time_str.split(":")
+                    hours = int(parts[0])
+                    minutes = int(parts[1])
+                    total_seconds = hours * 3600 + minutes * 60 + (i * interval)
+                    total_seconds = total_seconds % (24 * 3600)
+                    h = total_seconds // 3600
+                    m = (total_seconds % 3600) // 60
+                    base_time_str = f"{h:02d}:{m:02d}"
+
+                # Calculate actual time with delay
+                actual_time = self._calculate_actual_time(base_time_str, actual_delay)
+
+                self._job_registry.schedule_daily(
+                    runner, actual_time, command, max_runtime=max_runtime
+                )
+                self.scheduled_commands.append(
+                    ScheduledCommand(
+                        command_type, command, actual_time, actual_delay, max_runtime
+                    )
+                )
+                logger.info(
+                    "Scheduled %s command '%s' (execution %s/%s) at %s "
+                    "with calculated delay %ss",
+                    command_type,
+                    command,
+                    i + 1,
+                    num_executions,
+                    actual_time,
+                    actual_delay,
+                )
 
     def load_schedule(self) -> None:
         """Load commands from YAML and schedule them.
@@ -641,7 +762,7 @@ class Scheduler:
 
         # Phase 1: Load and validate all YAML files (no progress logging yet)
         all_entries: list[ScheduleEntry] = []
-        seen_entries: set[tuple[str, str, str, int, int, int, int | None]] = set()
+        seen_entries: set[tuple[str, str, str, int, int, int, int | None, dict[str, list[str | int | float]] | None]] = set()
         loaded_files: list[Path] = []
         duplicate_warnings: list[tuple[Path, ScheduleEntry]] = []
         allowed_duplicates: list[tuple[Path, ScheduleEntry]] = []
@@ -677,6 +798,13 @@ class Scheduler:
                             entry_data,
                             context={"registry": self._command_runners},
                         )
+                        # Convert variables to a hashable format for duplicate detection
+                        variables_hashable = None
+                        if entry.variables:
+                            variables_hashable = tuple(
+                                (k, tuple(v) if isinstance(v, list) else v)
+                                for k, v in sorted(entry.variables.items())
+                            )
                         entry_key = (
                             entry.type,
                             entry.command,
@@ -685,6 +813,7 @@ class Scheduler:
                             entry.repetitions,
                             entry.interval,
                             entry.max_runtime,
+                            variables_hashable,
                         )
                         if entry_key in seen_entries:
                             if self.config.allow_duplicates:
@@ -765,6 +894,7 @@ class Scheduler:
                 repetitions=entry.repetitions,
                 interval=entry.interval,
                 max_runtime=entry.max_runtime,
+                variables=entry.variables,
             )
 
         # Log all scheduled commands

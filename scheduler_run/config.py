@@ -161,10 +161,16 @@ class ScheduleEntry(BaseModel):
             where single-digit hours (H:MM) are allowed in addition to
             two-digit hours (HH:MM).
         delay: Optional delay in seconds, which triggers a random start delay.
-        repetitions: Number of times to repeat the command (0 means no repetition).
+        variables: Variable mappings for pattern expansion. If provided, the command
+            will be expanded for each combination of variable values using Cartesian
+            product. Variables are substituted using f-string style syntax (e.g., {num}).
+            Replaces the deprecated 'repetitions' field.
+        repetitions: [DEPRECATED] Number of times to repeat the command (0 means no repetition).
+            Use 'variables' instead for pattern-based expansion.
         interval: Time offset in seconds from the base time for each repetition
-            (only used when repetitions > 0). If set to -1 and repetitions > 0,
-            the interval is auto-calculated to spread runs evenly throughout the day.
+            (only used when repetitions > 0 or variables is set). If set to -1 and
+            repetitions > 0 or variables is set, the interval is auto-calculated to
+            spread runs evenly throughout the day.
 
     """
 
@@ -181,19 +187,30 @@ class ScheduleEntry(BaseModel):
         default=0,
         description="Optional delay in seconds, which triggers a random start delay",
     )
+    variables: dict[str, list[str | int | float]] | None = Field(
+        default=None,
+        description=(
+            "Variable mappings for pattern expansion. If provided, the command "
+            "will be expanded for each combination of variable values using Cartesian "
+            "product. Variables are substituted using f-string style syntax (e.g., {num})."
+        ),
+    )
     repetitions: int = Field(
         default=0,
-        description="Number of times to repeat the command (0 means no repetition)",
+        description=(
+            "[DEPRECATED] Number of times to repeat the command (0 means no repetition). "
+            "Use 'variables' instead for pattern-based expansion."
+        ),
     )
     interval: int = Field(
         default=-1,
         description=(
             "Time offset in seconds from the base time for each repetition "
-            "(only used when repetitions > 0). The timing for repetition i is "
-            "calculated as base_time + (i * interval) + delay_i, where delay_i "
-            "is a random delay recalculated for each execution. If set to -1 and "
-            "repetitions > 0, the interval is auto-calculated to spread runs "
-            "evenly throughout the day: 24*3600 / (repetitions + 1)"
+            "(only used when repetitions > 0 or variables is set). The timing for "
+            "repetition i is calculated as base_time + (i * interval) + delay_i, where "
+            "delay_i is a random delay recalculated for each execution. If set to -1 and "
+            "repetitions > 0 or variables is set, the interval is auto-calculated to "
+            "spread runs evenly throughout the day."
         ),
     )
     max_runtime: int | None = Field(
@@ -363,9 +380,46 @@ class ScheduleEntry(BaseModel):
             raise ValueError("Repetitions must be a non-negative integer")
         return v
 
+    @field_validator("variables")
+    @classmethod
+    def validate_variables(cls, v: dict[str, list[str | int | float]] | None) -> dict[str, list[str | int | float]] | None:
+        """Validate that variables is properly structured.
+
+        Args:
+            v: The variables value to validate.
+
+        Returns:
+            The validated variables value.
+
+        Raises:
+            ValueError: If variables is invalid.
+
+        """
+        if v is None:
+            return v
+
+        if not isinstance(v, dict):
+            raise ValueError("Variables must be a dictionary")
+
+        for key, values in v.items():
+            if not isinstance(key, str):
+                raise ValueError(f"Variable key must be a string, got {type(key).__name__}")
+            if not isinstance(values, list):
+                raise ValueError(f"Variable values for '{key}' must be a list, got {type(values).__name__}")
+            if not values:
+                raise ValueError(f"Variable values for '{key}' cannot be empty")
+            for value in values:
+                if not isinstance(value, (str, int, float)):
+                    raise ValueError(
+                        f"Variable value for '{key}' must be str, int, or float, "
+                        f"got {type(value).__name__}"
+                    )
+
+        return v
+
     @model_validator(mode="after")
     def validate_interval_with_repetitions(self) -> "ScheduleEntry":
-        """Validate that interval is consistent with repetitions.
+        """Validate that interval is consistent with repetitions or variables.
 
         Args:
             self: The ScheduleEntry instance.
@@ -374,10 +428,26 @@ class ScheduleEntry(BaseModel):
             The validated ScheduleEntry instance.
 
         Raises:
-            ValueError: If interval is invalid for the given repetitions.
+            ValueError: If interval is invalid for the given repetitions or variables.
 
         """
-        if self.repetitions > 0:
+        if self.variables is not None:
+            if self.repetitions > 0:
+                raise ValueError(
+                    "Cannot use both 'variables' and 'repetitions'. "
+                    "Use 'variables' for pattern-based expansion."
+                )
+            if self.interval == 0:
+                raise ValueError(
+                    "Interval cannot be 0 when variables is set. "
+                    "Use -1 for auto-calculation or a positive value."
+                )
+            if self.interval < 0 and self.interval != -1:
+                raise ValueError(
+                    f"Interval cannot be negative (except -1) when variables is set. "
+                    f"Got: {self.interval}"
+                )
+        elif self.repetitions > 0:
             if self.interval == 0:
                 raise ValueError(
                     "Interval cannot be 0 when repetitions > 0. "
@@ -390,7 +460,7 @@ class ScheduleEntry(BaseModel):
                 )
         elif self.repetitions == 0 and self.interval > 0:
             raise ValueError(
-                f"Interval ({self.interval}) is ignored when repetitions == 0. "
-                "Set repetitions > 0 to use interval, or set interval to -1."
+                f"Interval ({self.interval}) is ignored when repetitions == 0 and variables is not set. "
+                "Set repetitions > 0 or variables to use interval, or set interval to -1."
             )
         return self
