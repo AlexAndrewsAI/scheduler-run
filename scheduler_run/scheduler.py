@@ -293,7 +293,14 @@ class Scheduler:
                 logger.info("Command completed: %s (exit %s)", command, return_code)
             else:
                 logger.error("Command failed: %s (exit %s)", command, return_code)
-                # Log captured output if available
+                # Log captured output if available.
+                # NOTE: communicate() must be called at most once per process.
+                # This is safe here because _reap_finished_processes is the
+                # sole consumer of each RunningProcess — nothing else reads
+                # stdout/stderr — so the pipe buffers are still intact at
+                # this point. If that invariant ever changes, buffer the
+                # output at process-completion time instead of calling
+                # communicate() here.
                 if self.config.capture_output:
                     stdout, stderr = rp.process.communicate()
                     if stdout:
@@ -480,7 +487,7 @@ class Scheduler:
         """Calculate the actual start time including the random delay.
 
         Args:
-            time_str: The base time in H:MM or HH:MM format.
+            time_str: The base time in HH:MM format (as stored by ScheduleEntry).
             delay_seconds: The calculated random delay in seconds.
 
         Returns:

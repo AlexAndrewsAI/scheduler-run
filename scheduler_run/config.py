@@ -210,13 +210,17 @@ class ScheduleEntry(BaseModel):
     @field_validator("time")
     @classmethod
     def validate_time_format(cls, v: str) -> str:
-        """Validate that time is in H:MM or HH:MM format.
+        """Validate and normalise time to HH:MM format.
+
+        Accepts H:MM or HH:MM (24-hour). The value is always stored as
+        zero-padded HH:MM so that callers who inspect the field get a
+        consistent representation regardless of how it was supplied.
 
         Args:
             v: The time string to validate.
 
         Returns:
-            The validated time string.
+            The time string normalised to HH:MM (e.g. "9:00" → "09:00").
 
         Raises:
             ValueError: If the time format is invalid.
@@ -226,7 +230,8 @@ class ScheduleEntry(BaseModel):
             raise ValueError(
                 f"Invalid time format: '{v}'. Expected format: H:MM or HH:MM (24-hour)"
             )
-        return v
+        hours, minutes = v.split(":")
+        return f"{int(hours):02d}:{minutes}"
 
     @field_validator("command", mode="before")
     @classmethod
