@@ -40,7 +40,20 @@ def main(
     max_concurrent: int | None = typer.Option(
         5,
         "--max-concurrent",
-        help="Maximum number of concurrent subprocesses to run (default: 5)",
+        help=(
+            "Maximum number of concurrent subprocesses to run (default: 5). "
+            "Must be a positive integer or None (unlimited). "
+            "Zero and negative values are rejected."
+        ),
+    ),
+    capture_output: bool = typer.Option(
+        True,
+        "--capture-output/--no-capture-output",
+        help=(
+            "Capture stdout/stderr from subprocesses and log them on failure "
+            "(default: enabled). Pass --no-capture-output to let subprocess "
+            "output flow directly to the terminal."
+        ),
     ),
     version: bool | None = typer.Option(
         None,
@@ -72,6 +85,9 @@ def main(
         allow_duplicates: When True, duplicate schedule entries are scheduled twice.
         max_concurrent: Maximum number of concurrent subprocesses to run.
             Defaults to 5. Set to None for unlimited.
+        capture_output: When True, stdout/stderr from subprocesses is captured
+            and logged on failure. When False, output flows directly to the
+            terminal.
         version: Eager flag handled by version_callback; not used in the body.
 
     """
@@ -91,6 +107,7 @@ def main(
         yaml_path=files,
         allow_duplicates=allow_duplicates,
         max_concurrent=max_concurrent,
+        capture_output=capture_output,
     )
     scheduler = Scheduler(config)
     scheduler.run()

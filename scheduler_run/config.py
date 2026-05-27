@@ -9,10 +9,15 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
-# Registry of command runners: maps command type to execution function
-COMMAND_RUNNERS: dict[str, Callable[[str], None]] = {}
+# Type alias for a command runner registry
+CommandRegistry = dict[str, Callable[..., None]]
+
+# Module-level default registry.  Used for direct ScheduleEntry construction
+# (e.g. in tests) and as the fallback when no per-Scheduler context is supplied.
+# Typed as Callable[..., None] to allow optional keyword arguments (e.g. max_runtime)
+COMMAND_RUNNERS: CommandRegistry = {}
 
 
 # Placeholder for system runner - will be registered by Scheduler.__init__
@@ -100,6 +105,28 @@ class Config(BaseModel):
             "instead of model_construct."
         )
 
+    @field_validator("max_concurrent")
+    @classmethod
+    def validate_max_concurrent_positive(cls, v: int | None) -> int | None:
+        """Validate that max_concurrent is None or a positive integer.
+
+        Args:
+            v: The max_concurrent value to validate.
+
+        Returns:
+            The validated max_concurrent value.
+
+        Raises:
+            ValueError: If max_concurrent is zero or negative.
+
+        """
+        if v is not None and v <= 0:
+            raise ValueError(
+                "max_concurrent must be a positive integer (got "
+                f"{v}). Use None for unlimited concurrency."
+            )
+        return v
+
     @field_validator("yaml_path", mode="before")
     @classmethod
     def normalize_yaml_path(cls, v: Any) -> list[Path]:
@@ -169,19 +196,31 @@ class ScheduleEntry(BaseModel):
             "evenly throughout the day: 24*3600 / (repetitions + 1)"
         ),
     )
+    max_runtime: int | None = Field(
+        default=None,
+        description=(
+            "Maximum runtime in seconds for the job. Once a launched job hits "
+            "this runtime, it and all child processes are recursively hard killed "
+            "(SIGKILL). Defaults to None (no limit)."
+        ),
+    )
 
     model_config = {"title": "Schedule Entry", "frozen": True}
 
     @field_validator("time")
     @classmethod
     def validate_time_format(cls, v: str) -> str:
-        """Validate that time is in H:MM or HH:MM format.
+        """Validate and normalise time to HH:MM format.
+
+        Accepts H:MM or HH:MM (24-hour). The value is always stored as
+        zero-padded HH:MM so that callers who inspect the field get a
+        consistent representation regardless of how it was supplied.
 
         Args:
             v: The time string to validate.
 
         Returns:
-            The validated time string.
+            The time string normalised to HH:MM (e.g. "9:00" → "09:00").
 
         Raises:
             ValueError: If the time format is invalid.
@@ -191,7 +230,8 @@ class ScheduleEntry(BaseModel):
             raise ValueError(
                 f"Invalid time format: '{v}'. Expected format: H:MM or HH:MM (24-hour)"
             )
-        return v
+        hours, minutes = v.split(":")
+        return f"{int(hours):02d}:{minutes}"
 
     @field_validator("command", mode="before")
     @classmethod
@@ -230,11 +270,19 @@ class ScheduleEntry(BaseModel):
 
     @field_validator("type")
     @classmethod
-    def validate_type_supported(cls, v: str) -> str:
+    def validate_type_supported(cls, v: str, info: ValidationInfo) -> str:
         """Validate that type is not empty and is a supported type.
+
+        Checks the per-instance registry supplied via Pydantic validation
+        context (key ``"registry"``) when available, and falls back to the
+        module-level ``COMMAND_RUNNERS`` otherwise.  This allows ``Scheduler``
+        to validate against its own isolated registry without mutating global
+        state.
 
         Args:
             v: The type string to validate.
+            info: Pydantic validation info; may carry a ``"registry"`` key in
+                ``info.context`` that overrides the global registry.
 
         Returns:
             The validated type string.
@@ -245,12 +293,36 @@ class ScheduleEntry(BaseModel):
         """
         if not v.strip():
             raise ValueError("Type cannot be empty")
-        if v not in COMMAND_RUNNERS:
-            supported_types_str = ", ".join(sorted(COMMAND_RUNNERS.keys()))
+        registry: CommandRegistry = (
+            info.context.get("registry", COMMAND_RUNNERS)
+            if info.context
+            else COMMAND_RUNNERS
+        )
+        if v not in registry:
+            supported_types_str = ", ".join(sorted(registry.keys()))
             raise ValueError(
                 f"Unsupported command type: '{v}'. "
                 f"Supported types: {supported_types_str}"
             )
+        return v
+
+    @field_validator("max_runtime")
+    @classmethod
+    def validate_max_runtime_positive(cls, v: int | None) -> int | None:
+        """Validate that max_runtime is positive if set.
+
+        Args:
+            v: The max_runtime value to validate.
+
+        Returns:
+            The validated max_runtime.
+
+        Raises:
+            ValueError: If max_runtime is not a positive integer.
+
+        """
+        if v is not None and v <= 0:
+            raise ValueError("max_runtime must be a positive integer (seconds)")
         return v
 
     @field_validator("delay")

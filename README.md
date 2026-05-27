@@ -41,7 +41,7 @@ uv sync
 Create a YAML file with a `schedules` key containing a list of entries:
 - `type`: The type of command (currently only "system" is supported)
 - `command`: The command to execute
-- `time`: The time to run the command in 24-hour format (e.g., "14:10")
+- `time`: The time to run the command in 24-hour H:MM or HH:MM format (e.g., "14:10" or "9:00"). Single-digit hours are accepted and normalised to zero-padded HH:MM on load.
 - `delay`: The base delay in seconds (optional, defaults to 0). If specified, a random start delay is calculated based on a gaussian distribution: `max(0, int(random.gauss(mu=delay, sigma=0.15 * delay)))`
 - `repetitions`: Number of times to repeat the command (optional, defaults to 0). If greater than 0, the command will run `repetitions + 1` times total.
 - `interval`: Time offset in seconds from the base time for each repetition (optional, defaults to -1). Only used when `repetitions > 0`. The timing for repetition `i` is calculated as `base_time + (i * interval) + delay_i`, where `delay_i` is a random delay recalculated for each execution. If set to -1 and `repetitions > 0`, the interval is auto-calculated to spread runs evenly throughout the day: `24*3600 / (repetitions + 1)`

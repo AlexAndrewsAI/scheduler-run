@@ -37,18 +37,18 @@ def test_schedule_entry_valid() -> None:
 def test_schedule_entry_valid_time_formats() -> None:
     """Test ScheduleEntry with various valid time formats."""
     valid_times = [
-        "00:00",
-        "01:00",
-        "09:00",
-        "12:00",
-        "13:00",
-        "23:59",
-        "08:00",
-        "9:00",
+        ("00:00", "00:00"),
+        ("01:00", "01:00"),
+        ("09:00", "09:00"),
+        ("12:00", "12:00"),
+        ("13:00", "13:00"),
+        ("23:59", "23:59"),
+        ("08:00", "08:00"),
+        ("9:00", "09:00"),
     ]
-    for time_str in valid_times:
+    for time_str, expected in valid_times:
         entry = ScheduleEntry(type="system", command="echo test", time=time_str)
-        assert entry.time == time_str
+        assert entry.time == expected
 
 
 def test_schedule_entry_invalid_time_format() -> None:
@@ -118,6 +118,44 @@ def test_schedule_entry_repetitions_negative() -> None:
     """Test ScheduleEntry with negative repetitions."""
     with pytest.raises(ValueError, match="Repetitions must be a non-negative integer"):
         ScheduleEntry(type="system", command="echo test", time="14:30", repetitions=-5)
+
+
+def test_schedule_entry_max_runtime_valid() -> None:
+    """Test ScheduleEntry with valid max_runtime values."""
+    # Default should be None (no limit)
+    entry_default = ScheduleEntry(type="system", command="echo test", time="14:30")
+    assert entry_default.max_runtime is None
+
+    # Explicit None should also be accepted
+    entry_none = ScheduleEntry(
+        type="system", command="echo test", time="14:30", max_runtime=None
+    )
+    assert entry_none.max_runtime is None
+
+    # Positive integers should be accepted
+    entry_60 = ScheduleEntry(
+        type="system", command="echo test", time="14:30", max_runtime=60
+    )
+    assert entry_60.max_runtime == 60
+
+    entry_1 = ScheduleEntry(
+        type="system", command="echo test", time="14:30", max_runtime=1
+    )
+    assert entry_1.max_runtime == 1
+
+
+def test_schedule_entry_max_runtime_invalid() -> None:
+    """Test ScheduleEntry rejects zero and negative max_runtime values."""
+    with pytest.raises(ValueError, match="max_runtime must be a positive integer"):
+        ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=0)
+
+    with pytest.raises(ValueError, match="max_runtime must be a positive integer"):
+        ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=-1)
+
+    with pytest.raises(ValueError, match="max_runtime must be a positive integer"):
+        ScheduleEntry(
+            type="system", command="echo test", time="14:30", max_runtime=-3600
+        )
 
 
 def test_schedule_entry_interval_valid() -> None:
@@ -268,6 +306,42 @@ def test_config_normalize_yaml_path_invalid_type() -> None:
     """Test validator rejects invalid yaml_path types."""
     with pytest.raises(TypeError, match="Invalid type for yaml_path"):
         Config(yaml_path=123)  # type: ignore[arg-type]
+
+
+def test_config_max_concurrent_default() -> None:
+    """Test Config default max_concurrent value."""
+    config = Config()
+    assert config.max_concurrent == 5
+
+
+def test_config_max_concurrent_none() -> None:
+    """Test Config accepts None for unlimited concurrency."""
+    config = Config(max_concurrent=None)
+    assert config.max_concurrent is None
+
+
+def test_config_max_concurrent_positive() -> None:
+    """Test Config accepts positive integers for max_concurrent."""
+    config = Config(max_concurrent=1)
+    assert config.max_concurrent == 1
+
+    config = Config(max_concurrent=10)
+    assert config.max_concurrent == 10
+
+
+def test_config_max_concurrent_zero_rejected() -> None:
+    """Test Config rejects max_concurrent=0."""
+    with pytest.raises(ValueError, match="max_concurrent must be a positive integer"):
+        Config(max_concurrent=0)
+
+
+def test_config_max_concurrent_negative_rejected() -> None:
+    """Test Config rejects negative max_concurrent values."""
+    with pytest.raises(ValueError, match="max_concurrent must be a positive integer"):
+        Config(max_concurrent=-1)
+
+    with pytest.raises(ValueError, match="max_concurrent must be a positive integer"):
+        Config(max_concurrent=-100)
 
 
 def test_schedule_entry_command_list() -> None:

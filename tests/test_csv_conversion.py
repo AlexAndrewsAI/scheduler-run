@@ -35,6 +35,7 @@ def test_convert_csv_to_yaml_basic(
             "delay": 0,
             "repetitions": 0,
             "interval": -1,
+            "max_runtime": None,
         },
         {
             "type": "system",
@@ -43,6 +44,7 @@ def test_convert_csv_to_yaml_basic(
             "delay": 0,
             "repetitions": 0,
             "interval": -1,
+            "max_runtime": None,
         },
     ]
     assert "Successfully converted 2 schedule entries" in caplog.text
@@ -71,6 +73,7 @@ def test_convert_csv_with_optional_fields(tmp_path: Path) -> None:
             "delay": 10,
             "repetitions": 3,
             "interval": 3600,
+            "max_runtime": None,
         },
         {
             "type": "system",
@@ -79,6 +82,7 @@ def test_convert_csv_with_optional_fields(tmp_path: Path) -> None:
             "delay": 0,
             "repetitions": 0,
             "interval": -1,
+            "max_runtime": None,
         },
     ]
 
