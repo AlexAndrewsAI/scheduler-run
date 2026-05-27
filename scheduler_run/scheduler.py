@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 DELAY_SIGMA_MULTIPLIER = 0.15  # 15% standard deviation for delay randomization
 
 
-def _parse_time_to_next_run(target_time_str: str, now: datetime.datetime | None = None) -> datetime.datetime:
+def _parse_time_to_next_run(
+    target_time_str: str, now: datetime.datetime | None = None
+) -> datetime.datetime:
     """Calculate the next run datetime for a given target time string.
 
     Args:
