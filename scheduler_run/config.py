@@ -9,11 +9,15 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
-# Registry of command runners: maps command type to execution function
+# Type alias for a command runner registry
+CommandRegistry = dict[str, Callable[..., None]]
+
+# Module-level default registry.  Used for direct ScheduleEntry construction
+# (e.g. in tests) and as the fallback when no per-Scheduler context is supplied.
 # Typed as Callable[..., None] to allow optional keyword arguments (e.g. max_runtime)
-COMMAND_RUNNERS: dict[str, Callable[..., None]] = {}
+COMMAND_RUNNERS: CommandRegistry = {}
 
 
 # Placeholder for system runner - will be registered by Scheduler.__init__
@@ -100,6 +104,28 @@ class Config(BaseModel):
             "Use Config() constructor with proper validation "
             "instead of model_construct."
         )
+
+    @field_validator("max_concurrent")
+    @classmethod
+    def validate_max_concurrent_positive(cls, v: int | None) -> int | None:
+        """Validate that max_concurrent is None or a positive integer.
+
+        Args:
+            v: The max_concurrent value to validate.
+
+        Returns:
+            The validated max_concurrent value.
+
+        Raises:
+            ValueError: If max_concurrent is zero or negative.
+
+        """
+        if v is not None and v <= 0:
+            raise ValueError(
+                "max_concurrent must be a positive integer (got "
+                f"{v}). Use None for unlimited concurrency."
+            )
+        return v
 
     @field_validator("yaml_path", mode="before")
     @classmethod
@@ -239,11 +265,19 @@ class ScheduleEntry(BaseModel):
 
     @field_validator("type")
     @classmethod
-    def validate_type_supported(cls, v: str) -> str:
+    def validate_type_supported(cls, v: str, info: ValidationInfo) -> str:
         """Validate that type is not empty and is a supported type.
+
+        Checks the per-instance registry supplied via Pydantic validation
+        context (key ``"registry"``) when available, and falls back to the
+        module-level ``COMMAND_RUNNERS`` otherwise.  This allows ``Scheduler``
+        to validate against its own isolated registry without mutating global
+        state.
 
         Args:
             v: The type string to validate.
+            info: Pydantic validation info; may carry a ``"registry"`` key in
+                ``info.context`` that overrides the global registry.
 
         Returns:
             The validated type string.
@@ -254,8 +288,13 @@ class ScheduleEntry(BaseModel):
         """
         if not v.strip():
             raise ValueError("Type cannot be empty")
-        if v not in COMMAND_RUNNERS:
-            supported_types_str = ", ".join(sorted(COMMAND_RUNNERS.keys()))
+        registry: CommandRegistry = (
+            info.context.get("registry", COMMAND_RUNNERS)
+            if info.context
+            else COMMAND_RUNNERS
+        )
+        if v not in registry:
+            supported_types_str = ", ".join(sorted(registry.keys()))
             raise ValueError(
                 f"Unsupported command type: '{v}'. "
                 f"Supported types: {supported_types_str}"

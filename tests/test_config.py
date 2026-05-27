@@ -308,6 +308,42 @@ def test_config_normalize_yaml_path_invalid_type() -> None:
         Config(yaml_path=123)  # type: ignore[arg-type]
 
 
+def test_config_max_concurrent_default() -> None:
+    """Test Config default max_concurrent value."""
+    config = Config()
+    assert config.max_concurrent == 5
+
+
+def test_config_max_concurrent_none() -> None:
+    """Test Config accepts None for unlimited concurrency."""
+    config = Config(max_concurrent=None)
+    assert config.max_concurrent is None
+
+
+def test_config_max_concurrent_positive() -> None:
+    """Test Config accepts positive integers for max_concurrent."""
+    config = Config(max_concurrent=1)
+    assert config.max_concurrent == 1
+
+    config = Config(max_concurrent=10)
+    assert config.max_concurrent == 10
+
+
+def test_config_max_concurrent_zero_rejected() -> None:
+    """Test Config rejects max_concurrent=0."""
+    with pytest.raises(ValueError, match="max_concurrent must be a positive integer"):
+        Config(max_concurrent=0)
+
+
+def test_config_max_concurrent_negative_rejected() -> None:
+    """Test Config rejects negative max_concurrent values."""
+    with pytest.raises(ValueError, match="max_concurrent must be a positive integer"):
+        Config(max_concurrent=-1)
+
+    with pytest.raises(ValueError, match="max_concurrent must be a positive integer"):
+        Config(max_concurrent=-100)
+
+
 def test_schedule_entry_command_list() -> None:
     """Test ScheduleEntry with command as list is normalized to string."""
     entry = ScheduleEntry(

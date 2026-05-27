@@ -12,7 +12,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from scheduler_run.config import COMMAND_RUNNERS, Config
+from scheduler_run.config import Config
 from scheduler_run.scheduler import RunningProcess, Scheduler
 
 
@@ -31,20 +31,24 @@ def test_scheduler_init_custom_config() -> None:
 
 
 def test_scheduler_registers_system_runner() -> None:
-    """Test Scheduler registers the system command runner on initialization."""
-    # Save original system runner
-    original_system = COMMAND_RUNNERS.get("system")
-
-    COMMAND_RUNNERS.clear()
-    assert "system" not in COMMAND_RUNNERS
-
+    """Test Scheduler populates its instance registry with the system runner."""
     scheduler = Scheduler()
-    assert "system" in COMMAND_RUNNERS
-    assert COMMAND_RUNNERS["system"] == scheduler._run_system_command
+    assert "system" in scheduler._command_runners
+    assert scheduler._command_runners["system"] == scheduler._run_system_command
 
-    # Restore original system runner
-    if original_system is not None:
-        COMMAND_RUNNERS["system"] = original_system
+
+def test_scheduler_instance_registries_are_isolated() -> None:
+    """Test that two Scheduler instances have independent command registries."""
+    scheduler_a = Scheduler()
+    scheduler_b = Scheduler()
+
+    # Each instance's runner points to its own bound method, not a shared reference
+    assert (
+        scheduler_a._command_runners["system"]
+        is not scheduler_b._command_runners["system"]
+    )
+    assert scheduler_a._command_runners["system"] == scheduler_a._run_system_command
+    assert scheduler_b._command_runners["system"] == scheduler_b._run_system_command
 
 
 def test_run_system_command_success(
@@ -177,7 +181,10 @@ def test_reap_finished_processes_keeps_running() -> None:
 def test_reap_finished_processes_kills_when_max_runtime_exceeded(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test _reap_finished_processes hard-kills the process group when max_runtime is exceeded."""
+    """Test _reap_finished_processes hard-kills the process group.
+
+    When max_runtime is exceeded.
+    """
     scheduler = Scheduler()
     caplog.set_level(logging.WARNING)
 
@@ -231,6 +238,44 @@ def test_run_system_command_not_found(caplog: pytest.LogCaptureFixture) -> None:
         scheduler._run_system_command("nonexistent-cmd-xyz")
         assert scheduler._running_processes == []
         assert "Command not found: nonexistent-cmd-xyz" in caplog.text
+
+
+def test_run_system_command_malformed_syntax_does_not_crash_scheduler(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _run_system_command logs an error and returns on malformed command syntax.
+
+    An unterminated quote causes shlex.split to raise ValueError. The scheduler
+    loop must not crash — the bad command is skipped and logged.
+    """
+    scheduler = Scheduler()
+    caplog.set_level(logging.ERROR)
+
+    # Unterminated single quote — shlex.split raises ValueError
+    scheduler._run_system_command("echo 'unterminated")
+
+    assert scheduler._running_processes == []
+    assert "Invalid command syntax" in caplog.text
+    assert "echo 'unterminated" in caplog.text
+
+
+def test_run_system_command_malformed_syntax_does_not_prevent_subsequent_commands(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test that a malformed command does not block subsequent valid commands."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.ERROR)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    with patch("scheduler_run.scheduler.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = mock_process
+
+        scheduler._run_system_command("echo 'unterminated")  # bad — skipped
+        scheduler._run_system_command("echo hello")  # good — should start
+
+    assert len(scheduler._running_processes) == 1
+    assert scheduler._running_processes[0].process is mock_process
+    assert "Invalid command syntax" in caplog.text
 
 
 def test_terminate_running_processes(caplog: pytest.LogCaptureFixture) -> None:
@@ -290,7 +335,10 @@ def test_terminate_running_processes_kills_on_timeout(
 
 
 def test_kill_process_group_process_already_gone() -> None:
-    """Test _kill_process_group silently ignores ProcessLookupError (process already dead)."""
+    """Test _kill_process_group silently ignores ProcessLookupError.
+
+    Process already dead.
+    """
     scheduler = Scheduler()
 
     mock_process = MagicMock(spec=subprocess.Popen)
@@ -304,7 +352,10 @@ def test_kill_process_group_process_already_gone() -> None:
 def test_terminate_running_processes_process_already_gone_on_sigterm(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test _terminate_running_processes silently ignores ProcessLookupError on SIGTERM."""
+    """Test _terminate_running_processes silently ignores ProcessLookupError.
+
+    On SIGTERM.
+    """
     scheduler = Scheduler()
     caplog.set_level(logging.INFO)
 
@@ -392,6 +443,38 @@ def test_load_schedule_missing_schedules_key(
         scheduler.load_schedule()
 
     assert "Invalid YAML format" in caplog.text
+    assert len(scheduler._job_registry.get_jobs()) == 0
+    assert len(scheduler.scheduled_commands) == 0
+
+
+@pytest.mark.parametrize(
+    ("yaml_content", "expected_type_name"),
+    [
+        ("schedules: null\n", "NoneType"),
+        ("schedules: 'oops'\n", "str"),
+        ("schedules: 42\n", "int"),
+        ("schedules:\n  key: value\n", "dict"),
+    ],
+    ids=["schedules_null", "schedules_string", "schedules_int", "schedules_dict"],
+)
+def test_load_schedule_schedules_not_a_list(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    yaml_content: str,
+    expected_type_name: str,
+) -> None:
+    """Test load_schedule raises ValueError when 'schedules' is not a list."""
+    yaml_file = tmp_path / "bad_schedules.yaml"
+    yaml_file.write_text(yaml_content)
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with pytest.raises(ValueError, match="'schedules' must be a list"):
+        scheduler.load_schedule()
+
+    assert expected_type_name in caplog.text
     assert len(scheduler._job_registry.get_jobs()) == 0
     assert len(scheduler.scheduled_commands) == 0
 
@@ -1094,20 +1177,6 @@ def test_max_concurrent_none_unlimited(caplog: pytest.LogCaptureFixture) -> None
         assert len(scheduler._running_processes) == 5
         assert len(scheduler._pending_queue) == 0
         assert "Throttling" not in caplog.text
-
-
-def test_max_concurrent_zero_allows_none(caplog: pytest.LogCaptureFixture) -> None:
-    """Test that max_concurrent=0 allows no concurrent processes (all queued)."""
-    config = Config(max_concurrent=0)
-    scheduler = Scheduler(config)
-    caplog.set_level(logging.INFO)
-
-    # Try to start a command with limit 0
-    scheduler._run_system_command("sleep 10")
-
-    assert len(scheduler._running_processes) == 0
-    assert len(scheduler._pending_queue) == 1
-    assert "Throttling: queuing command 'sleep 10'" in caplog.text
 
 
 def test_process_pending_queue_no_limit(caplog: pytest.LogCaptureFixture) -> None:

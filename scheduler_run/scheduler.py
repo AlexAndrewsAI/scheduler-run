@@ -20,7 +20,7 @@ from typing import Any, NamedTuple
 import yaml
 from pydantic import ValidationError
 
-from scheduler_run.config import COMMAND_RUNNERS, Config, ScheduleEntry
+from scheduler_run.config import CommandRegistry, Config, ScheduleEntry
 
 logger = logging.getLogger(__name__)
 
@@ -242,8 +242,11 @@ class Scheduler:
         )  # (command_type, command, max_runtime)
         self._job_registry = JobRegistry()
 
-        # Register the system command runner
-        COMMAND_RUNNERS["system"] = self._run_system_command
+        # Instance-level registry — isolated from global state and from other
+        # Scheduler instances.  Populated here so the Scheduler owns its runners.
+        self._command_runners: CommandRegistry = {
+            "system": self._run_system_command,
+        }
 
     def _reap_finished_processes(self) -> None:
         """Remove finished child processes and log their exit status."""
@@ -305,8 +308,10 @@ class Scheduler:
             # No limit, process all pending commands
             while self._pending_queue:
                 command_type, command, max_runtime = self._pending_queue.popleft()
-                if command_type in COMMAND_RUNNERS:
-                    COMMAND_RUNNERS[command_type](command, max_runtime=max_runtime)
+                if command_type in self._command_runners:
+                    self._command_runners[command_type](
+                        command, max_runtime=max_runtime
+                    )
                 else:
                     logger.error("Unsupported command type in queue: %s", command_type)
             return
@@ -321,8 +326,8 @@ class Scheduler:
                 max_concurrent,
                 len(self._pending_queue),
             )
-            if command_type in COMMAND_RUNNERS:
-                COMMAND_RUNNERS[command_type](command, max_runtime=max_runtime)
+            if command_type in self._command_runners:
+                self._command_runners[command_type](command, max_runtime=max_runtime)
             else:
                 logger.error("Unsupported command type in queue: %s", command_type)
 
@@ -423,6 +428,13 @@ class Scheduler:
         logger.info("Starting system command: %s", command)
         try:
             args = shlex.split(command)
+        except ValueError as e:
+            logger.error(
+                "Invalid command syntax (could not parse): %s. Error: %s", command, e
+            )
+            return
+
+        try:
             if self.config.capture_output:
                 process = subprocess.Popen(  # noqa: S603
                     args,
@@ -528,17 +540,17 @@ class Scheduler:
                 hard-killed (SIGKILL).  None means no limit.
 
         Raises:
-            ValueError: If the command type is not registered in COMMAND_RUNNERS.
+            ValueError: If the command type is not registered in the instance registry.
 
         """
-        if command_type not in COMMAND_RUNNERS:
-            supported_types_str = ", ".join(sorted(COMMAND_RUNNERS.keys()))
+        if command_type not in self._command_runners:
+            supported_types_str = ", ".join(sorted(self._command_runners.keys()))
             raise ValueError(
                 f"Unsupported command type: {command_type}. "
                 f"Supported types: {supported_types_str}"
             )
 
-        runner = COMMAND_RUNNERS[command_type]
+        runner = self._command_runners[command_type]
 
         # Auto-calculate interval if -1 and repetitions > 0
         if interval == -1 and repetitions > 0:
@@ -634,14 +646,26 @@ class Scheduler:
                         )
                         raise ValueError(error_msg)
 
-                    for entry_data in data["schedules"]:
+                    schedules = data["schedules"]
+                    if not isinstance(schedules, list):
+                        error_msg = (
+                            f"Invalid YAML format in {yaml_path}: "
+                            f"'schedules' must be a list, "
+                            f"got {type(schedules).__name__}"
+                        )
+                        raise ValueError(error_msg)
+
+                    for entry_data in schedules:
                         if not isinstance(entry_data, dict):
                             error_msg = (
                                 f"Invalid entry in {yaml_path}: expected dict, "
                                 f"got {type(entry_data).__name__}: {entry_data}"
                             )
                             raise ValueError(error_msg)
-                        entry = ScheduleEntry(**entry_data)
+                        entry = ScheduleEntry.model_validate(
+                            entry_data,
+                            context={"registry": self._command_runners},
+                        )
                         entry_key = (
                             entry.type,
                             entry.command,

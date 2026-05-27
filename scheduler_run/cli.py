@@ -40,7 +40,11 @@ def main(
     max_concurrent: int | None = typer.Option(
         5,
         "--max-concurrent",
-        help="Maximum number of concurrent subprocesses to run (default: 5)",
+        help=(
+            "Maximum number of concurrent subprocesses to run (default: 5). "
+            "Must be a positive integer or None (unlimited). "
+            "Zero and negative values are rejected."
+        ),
     ),
     version: bool | None = typer.Option(
         None,
