@@ -543,6 +543,52 @@ def test_schedule_entry_variables_invalid_value_type() -> None:
         )
 
 
+def test_schedule_entry_variables_validator_none() -> None:
+    """Test validate_variables returns None when v is None (line 401)."""
+    from scheduler_run.config import ScheduleEntry
+
+    # Use model_validate with context to bypass type checking and test the validator directly
+    result = ScheduleEntry.validate_variables(None)
+    assert result is None
+
+
+def test_schedule_entry_variables_validator_not_dict() -> None:
+    """Test validate_variables raises ValueError when v is not a dict (line 404)."""
+    from scheduler_run.config import ScheduleEntry
+
+    with pytest.raises(ValueError, match="Variables must be a dictionary"):
+        ScheduleEntry.validate_variables("not a dict")  # type: ignore[arg-type]
+
+
+def test_schedule_entry_variables_validator_key_not_string() -> None:
+    """Test validate_variables raises ValueError when key is not a string (line 408)."""
+    from scheduler_run.config import ScheduleEntry
+
+    with pytest.raises(ValueError, match="Variable key must be a string, got int"):
+        ScheduleEntry.validate_variables({123: [1, 2, 3]})  # type: ignore[dict-item]
+
+
+def test_schedule_entry_variables_validator_values_not_list() -> None:
+    """Test validate_variables raises ValueError when values is not a list (line 412)."""
+    from scheduler_run.config import ScheduleEntry
+
+    with pytest.raises(
+        ValueError, match="Variable values for 'num' must be a list, got str"
+    ):
+        ScheduleEntry.validate_variables({"num": "not a list"})  # type: ignore[dict-item]
+
+
+def test_schedule_entry_variables_validator_value_invalid_type() -> None:
+    """Test validate_variables raises ValueError when value is not str/int/float (line 419)."""
+    from scheduler_run.config import ScheduleEntry
+
+    with pytest.raises(
+        ValueError,
+        match="Variable value for 'num' must be str, int, or float, got dict",
+    ):
+        ScheduleEntry.validate_variables({"num": [1, 2, {"invalid": "dict"}]})  # type: ignore[dict-item]
+
+
 def test_schedule_entry_variables_and_repetitions_conflict() -> None:
     """Test ScheduleEntry rejects both variables and repetitions set."""
     with pytest.raises(

@@ -641,7 +641,9 @@ class Scheduler:
                 if delay > 0:
                     actual_delay = max(
                         0,
-                        int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
+                        int(
+                            random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
+                        ),
                     )
                 else:
                     actual_delay = 0
@@ -668,7 +670,11 @@ class Scheduler:
                 )
                 self.scheduled_commands.append(
                     ScheduledCommand(
-                        command_type, expanded_command, actual_time, actual_delay, max_runtime
+                        command_type,
+                        expanded_command,
+                        actual_time,
+                        actual_delay,
+                        max_runtime,
                     )
                 )
                 logger.info(
@@ -702,7 +708,9 @@ class Scheduler:
                 if delay > 0:
                     actual_delay = max(
                         0,
-                        int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
+                        int(
+                            random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
+                        ),
                     )
                 else:
                     actual_delay = 0
@@ -762,7 +770,18 @@ class Scheduler:
 
         # Phase 1: Load and validate all YAML files (no progress logging yet)
         all_entries: list[ScheduleEntry] = []
-        seen_entries: set[tuple[str, str, str, int, int, int, int | None, dict[str, list[str | int | float]] | None]] = set()
+        seen_entries: set[
+            tuple[
+                str,
+                str,
+                str,
+                int,
+                int,
+                int,
+                int | None,
+                dict[str, list[str | int | float]] | None,
+            ]
+        ] = set()
         loaded_files: list[Path] = []
         duplicate_warnings: list[tuple[Path, ScheduleEntry]] = []
         allowed_duplicates: list[tuple[Path, ScheduleEntry]] = []

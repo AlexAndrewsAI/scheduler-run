@@ -382,7 +382,9 @@ class ScheduleEntry(BaseModel):
 
     @field_validator("variables")
     @classmethod
-    def validate_variables(cls, v: dict[str, list[str | int | float]] | None) -> dict[str, list[str | int | float]] | None:
+    def validate_variables(
+        cls, v: dict[str, list[str | int | float]] | None
+    ) -> dict[str, list[str | int | float]] | None:
         """Validate that variables is properly structured.
 
         Args:
@@ -403,9 +405,13 @@ class ScheduleEntry(BaseModel):
 
         for key, values in v.items():
             if not isinstance(key, str):
-                raise ValueError(f"Variable key must be a string, got {type(key).__name__}")
+                raise ValueError(
+                    f"Variable key must be a string, got {type(key).__name__}"
+                )
             if not isinstance(values, list):
-                raise ValueError(f"Variable values for '{key}' must be a list, got {type(values).__name__}")
+                raise ValueError(
+                    f"Variable values for '{key}' must be a list, got {type(values).__name__}"
+                )
             if not values:
                 raise ValueError(f"Variable values for '{key}' cannot be empty")
             for value in values:

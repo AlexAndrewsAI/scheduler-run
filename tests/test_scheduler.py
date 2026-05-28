@@ -1953,3 +1953,58 @@ def test_load_schedule_variables_and_repetitions_conflict(
     # Verify no commands were scheduled due to atomicity
     assert len(scheduler._job_registry.get_jobs()) == 0
     assert len(scheduler.scheduled_commands) == 0
+
+
+def test_expand_variables_key_error() -> None:
+    """Test _expand_variables raises ValueError on KeyError (lines 75-76)."""
+
+    # Create a custom string subclass that raises KeyError on format
+    class ErrorString(str):
+        def format(self, *args, **kwargs):
+            raise KeyError("test")
+
+    with pytest.raises(ValueError, match="Failed to substitute variables"):
+        _expand_variables(ErrorString("echo {num}"), {"num": [1, 2, 3]})
+
+
+def test_expand_variables_value_error() -> None:
+    """Test _expand_variables raises ValueError on ValueError (lines 75-76)."""
+
+    # Create a custom string subclass that raises ValueError on format
+    class ErrorString(str):
+        def format(self, *args, **kwargs):
+            raise ValueError("test")
+
+    with pytest.raises(ValueError, match="Failed to substitute variables"):
+        _expand_variables(ErrorString("echo {num}"), {"num": [1, 2, 3]})
+
+
+def test_schedule_command_with_variables_and_delay(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _schedule_command with variables and delay > 0 (line 642)."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    with patch("scheduler_run.scheduler.random.gauss") as mock_gauss:
+        mock_gauss.return_value = 12.3
+
+        scheduler._schedule_command(
+            "system",
+            "echo {num}",
+            "14:30",
+            delay=10,
+            variables={"num": [1, 2, 3]},
+            interval=60,
+        )
+
+        # Verify gauss was called for each variable expansion
+        assert mock_gauss.call_count == 3
+
+        # Verify the command was scheduled
+        assert len(scheduler.scheduled_commands) == 3
+        assert len(scheduler._job_registry.get_jobs()) == 3
+
+        # Verify delay was applied
+        for cmd in scheduler.scheduled_commands:
+            assert cmd.delay == 12
