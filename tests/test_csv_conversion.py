@@ -9,9 +9,7 @@ import yaml
 from scripts.convert_csv_to_yaml import convert_csv_to_yaml
 
 
-def test_convert_csv_to_yaml_basic(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_convert_csv_to_yaml_basic(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test basic CSV to YAML conversion."""
     csv_file = tmp_path / "schedule.csv"
     csv_file.write_text(
@@ -34,6 +32,7 @@ def test_convert_csv_to_yaml_basic(
             "time": "14:10",
             "delay": 0,
             "variables": None,
+            "variables_env": None,
             "repetitions": 0,
             "interval": -1,
             "max_runtime": None,
@@ -44,6 +43,7 @@ def test_convert_csv_to_yaml_basic(
             "time": "15:00",
             "delay": 0,
             "variables": None,
+            "variables_env": None,
             "repetitions": 0,
             "interval": -1,
             "max_runtime": None,
@@ -74,6 +74,7 @@ def test_convert_csv_with_optional_fields(tmp_path: Path) -> None:
             "time": "14:10",
             "delay": 10,
             "variables": None,
+            "variables_env": None,
             "repetitions": 3,
             "interval": 3600,
             "max_runtime": None,
@@ -84,6 +85,7 @@ def test_convert_csv_with_optional_fields(tmp_path: Path) -> None:
             "time": "15:00",
             "delay": 0,
             "variables": None,
+            "variables_env": None,
             "repetitions": 0,
             "interval": -1,
             "max_runtime": None,
@@ -131,9 +133,7 @@ def test_convert_csv_empty_optional_fields(tmp_path: Path) -> None:
     assert entry["interval"] == -1
 
 
-def test_convert_csv_invalid_delay(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_convert_csv_invalid_delay(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test CSV conversion with invalid delay value."""
     csv_file = tmp_path / "schedule.csv"
     csv_file.write_text("type,command,time,delay\nsystem,echo 'hello',14:10,invalid\n")
@@ -150,14 +150,10 @@ def test_convert_csv_invalid_delay(
     assert data["schedules"][0]["delay"] == 0
 
 
-def test_convert_csv_invalid_repetitions(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_convert_csv_invalid_repetitions(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test CSV conversion with invalid repetitions value."""
     csv_file = tmp_path / "schedule.csv"
-    csv_file.write_text(
-        "type,command,time,repetitions\nsystem,echo 'hello',14:10,abc\n"
-    )
+    csv_file.write_text("type,command,time,repetitions\nsystem,echo 'hello',14:10,abc\n")
 
     yaml_file = tmp_path / "schedule.yaml"
     caplog.set_level(logging.WARNING)
@@ -171,14 +167,10 @@ def test_convert_csv_invalid_repetitions(
     assert data["schedules"][0]["repetitions"] == 0
 
 
-def test_convert_csv_invalid_interval(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_convert_csv_invalid_interval(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test CSV conversion with invalid interval value."""
     csv_file = tmp_path / "schedule.csv"
-    csv_file.write_text(
-        "type,command,time,interval\nsystem,echo 'hello',14:10,notanumber\n"
-    )
+    csv_file.write_text("type,command,time,interval\nsystem,echo 'hello',14:10,notanumber\n")
 
     yaml_file = tmp_path / "schedule.yaml"
     caplog.set_level(logging.WARNING)
@@ -192,16 +184,11 @@ def test_convert_csv_invalid_interval(
     assert data["schedules"][0]["interval"] == -1
 
 
-def test_convert_csv_incomplete_row(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_convert_csv_incomplete_row(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test CSV conversion with incomplete row (missing required fields)."""
     csv_file = tmp_path / "schedule.csv"
     csv_file.write_text(
-        "type,command,time\n"
-        "system,echo 'hello',14:10\n"
-        "system,,15:00\n"
-        "system,echo 'test',\n"
+        "type,command,time\nsystem,echo 'hello',14:10\nsystem,,15:00\nsystem,echo 'test',\n"
     )
 
     yaml_file = tmp_path / "schedule.yaml"
@@ -218,9 +205,7 @@ def test_convert_csv_incomplete_row(
     assert data["schedules"][0]["command"] == "echo 'hello'"
 
 
-def test_convert_csv_empty_file(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_convert_csv_empty_file(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test CSV conversion with empty file (only header)."""
     csv_file = tmp_path / "schedule.csv"
     csv_file.write_text("type,command,time\n")

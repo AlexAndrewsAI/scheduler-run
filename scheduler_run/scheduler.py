@@ -6,6 +6,7 @@ specified times.
 
 import datetime
 import itertools
+import json
 import logging
 import os
 import random
@@ -32,7 +33,7 @@ DELAY_SIGMA_MULTIPLIER = 0.15  # 15% standard deviation for delay randomization
 
 def _expand_variables(
     command: str, variables: dict[str, list[str | int | float]]
-) -> list[tuple[str, dict[str, str | int | float]]]:
+) -> list[tuple[str, dict[str, str | int | float | None]]]:
     """Expand a command using variable mappings with Cartesian product.
 
     Args:
@@ -67,15 +68,13 @@ def _expand_variables(
     var_values = [variables[name] for name in var_names]
 
     # Compute Cartesian product
-    expanded_commands: list[tuple[str, dict[str, str | int | float]]] = []
+    expanded_commands: list[tuple[str, dict[str, str | int | float | None]]] = []
     for combination in itertools.product(*var_values):
-        var_mapping = dict(zip(var_names, combination))
+        var_mapping = dict(zip(var_names, combination, strict=True))
         try:
             expanded_command = command.format(**var_mapping)
         except (KeyError, ValueError) as e:
-            raise ValueError(
-                f"Failed to substitute variables in command '{command}': {e}"
-            )
+            raise ValueError(f"Failed to substitute variables in command '{command}': {e}") from e
         expanded_commands.append((expanded_command, var_mapping))
 
     return expanded_commands
@@ -173,9 +172,7 @@ class Job:
             minutes = int(parts[1])
             seconds = int(parts[2]) if len(parts) > 2 else 0
 
-            today_target = now.replace(
-                hour=hours, minute=minutes, second=seconds, microsecond=0
-            )
+            today_target = now.replace(hour=hours, minute=minutes, second=seconds, microsecond=0)
 
             # If last_run was before today's target time and now is after it,
             # the job should run
@@ -359,13 +356,9 @@ class Scheduler:
                 if self.config.capture_output:
                     stdout, stderr = rp.process.communicate()
                     if stdout:
-                        logger.error(
-                            "stdout: %s", stdout.decode(errors="replace").strip()
-                        )
+                        logger.error("stdout: %s", stdout.decode(errors="replace").strip())
                     if stderr:
-                        logger.error(
-                            "stderr: %s", stderr.decode(errors="replace").strip()
-                        )
+                        logger.error("stderr: %s", stderr.decode(errors="replace").strip())
                     logger.warning(
                         "Command '%s' failed with exit code %s. "
                         "Check the logs above for output details.",
@@ -386,9 +379,7 @@ class Scheduler:
             while self._pending_queue:
                 command_type, command, max_runtime = self._pending_queue.popleft()
                 if command_type in self._command_runners:
-                    self._command_runners[command_type](
-                        command, max_runtime=max_runtime
-                    )
+                    self._command_runners[command_type](command, max_runtime=max_runtime)
                 else:
                     logger.error("Unsupported command type in queue: %s", command_type)
             return
@@ -488,10 +479,7 @@ class Scheduler:
 
         """
         max_concurrent = self.config.max_concurrent
-        if (
-            max_concurrent is not None
-            and len(self._running_processes) >= max_concurrent
-        ):
+        if max_concurrent is not None and len(self._running_processes) >= max_concurrent:
             logger.info(
                 "Throttling: queuing command '%s' (running: %s/%s, queued: %s)",
                 command,
@@ -506,9 +494,7 @@ class Scheduler:
         try:
             args = shlex.split(command)
         except ValueError as e:
-            logger.error(
-                "Invalid command syntax (could not parse): %s. Error: %s", command, e
-            )
+            logger.error("Invalid command syntax (could not parse): %s. Error: %s", command, e)
             return
 
         try:
@@ -588,6 +574,7 @@ class Scheduler:
         interval: int = -1,
         max_runtime: int | None = None,
         variables: dict[str, list[str | int | float]] | None = None,
+        variables_env: dict[str, str] | None = None,
     ) -> None:
         """Schedule a single command.
 
@@ -606,6 +593,9 @@ class Scheduler:
                 hard-killed (SIGKILL).  None means no limit.
             variables: Variable mappings for pattern expansion. If provided, the command
                 will be expanded for each combination of variable values.
+            variables_env: Variable mappings from environment variables. Maps variable
+                names to environment variable names. The environment variable values
+                are JSON-formatted strings containing lists of values.
 
         Raises:
             ValueError: If the command type is not registered in the instance registry.
@@ -614,16 +604,35 @@ class Scheduler:
         if command_type not in self._command_runners:
             supported_types_str = ", ".join(sorted(self._command_runners.keys()))
             raise ValueError(
-                f"Unsupported command type: {command_type}. "
-                f"Supported types: {supported_types_str}"
+                f"Unsupported command type: {command_type}. Supported types: {supported_types_str}"
             )
 
         runner = self._command_runners[command_type]
 
-        # Handle variable expansion
+        # Merge variables and variables_env
+        merged_variables: dict[str, list[str | int | float]] = {}
         if variables is not None:
-            # Expand command using variables
-            expanded_commands = _expand_variables(command, variables)
+            merged_variables.update(variables)
+        if variables_env is not None:
+            for var_name, env_var_name in variables_env.items():
+                env_value = os.environ.get(env_var_name)
+                if env_value is not None:
+                    try:
+                        parsed_value = json.loads(env_value)
+                        if isinstance(parsed_value, list):
+                            merged_variables[var_name] = parsed_value
+                    except (json.JSONDecodeError, ValueError):
+                        # Validation should have caught this, but handle gracefully
+                        logger.warning(
+                            "Failed to parse environment variable '%s' for variable '%s'",
+                            env_var_name,
+                            var_name,
+                        )
+
+        # Handle variable expansion
+        if merged_variables:
+            # Expand command using merged variables
+            expanded_commands = _expand_variables(command, merged_variables)
             num_executions = len(expanded_commands)
 
             # Auto-calculate interval if -1
@@ -641,9 +650,7 @@ class Scheduler:
                 if delay > 0:
                     actual_delay = max(
                         0,
-                        int(
-                            random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
-                        ),
+                        int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
                     )
                 else:
                     actual_delay = 0
@@ -708,9 +715,7 @@ class Scheduler:
                 if delay > 0:
                     actual_delay = max(
                         0,
-                        int(
-                            random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)
-                        ),
+                        int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
                     )
                 else:
                     actual_delay = 0
@@ -736,13 +741,10 @@ class Scheduler:
                     runner, actual_time, command, max_runtime=max_runtime
                 )
                 self.scheduled_commands.append(
-                    ScheduledCommand(
-                        command_type, command, actual_time, actual_delay, max_runtime
-                    )
+                    ScheduledCommand(command_type, command, actual_time, actual_delay, max_runtime)
                 )
                 logger.info(
-                    "Scheduled %s command '%s' (execution %s/%s) at %s "
-                    "with calculated delay %ss",
+                    "Scheduled %s command '%s' (execution %s/%s) at %s with calculated delay %ss",
                     command_type,
                     command,
                     i + 1,
@@ -779,7 +781,8 @@ class Scheduler:
                 int,
                 int,
                 int | None,
-                dict[str, list[str | int | float]] | None,
+                tuple | None,
+                tuple | None,
             ]
         ] = set()
         loaded_files: list[Path] = []
@@ -791,10 +794,7 @@ class Scheduler:
                 with open(yaml_path, encoding="utf-8") as yamlfile:
                     data = yaml.safe_load(yamlfile)
                     if not data or "schedules" not in data:
-                        error_msg = (
-                            f"Invalid YAML format in {yaml_path}: "
-                            "missing 'schedules' key"
-                        )
+                        error_msg = f"Invalid YAML format in {yaml_path}: missing 'schedules' key"
                         raise ValueError(error_msg)
 
                     schedules = data["schedules"]
@@ -824,6 +824,13 @@ class Scheduler:
                                 (k, tuple(v) if isinstance(v, list) else v)
                                 for k, v in sorted(entry.variables.items())
                             )
+                        # Convert variables_env to a hashable format
+                        # for duplicate detection
+                        variables_env_hashable = None
+                        if entry.variables_env:
+                            variables_env_hashable = tuple(
+                                (k, v) for k, v in sorted(entry.variables_env.items())
+                            )
                         entry_key = (
                             entry.type,
                             entry.command,
@@ -833,6 +840,7 @@ class Scheduler:
                             entry.interval,
                             entry.max_runtime,
                             variables_hashable,
+                            variables_env_hashable,
                         )
                         if entry_key in seen_entries:
                             if self.config.allow_duplicates:
@@ -914,15 +922,14 @@ class Scheduler:
                 interval=entry.interval,
                 max_runtime=entry.max_runtime,
                 variables=entry.variables,
+                variables_env=entry.variables_env,
             )
 
         # Log all scheduled commands
         logger.info("Scheduled commands:")
         for cmd in self.scheduled_commands:
             next_run = self._calculate_next_run(cmd.time)
-            max_rt_str = (
-                f"{cmd.max_runtime}s" if cmd.max_runtime is not None else "none"
-            )
+            max_rt_str = f"{cmd.max_runtime}s" if cmd.max_runtime is not None else "none"
             logger.info(
                 "%s • %s • %s • delay: %ss • max_runtime: %s",
                 cmd.command_type,

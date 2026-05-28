@@ -40,9 +40,7 @@ def _parse_optional_int(row: dict, key: str, default: int) -> int:
         try:
             return int(value_str)
         except ValueError:
-            logger.warning(
-                "Invalid %s value '%s', using default %s", key, value_str, default
-            )
+            logger.warning("Invalid %s value '%s', using default %s", key, value_str, default)
             return default
     return default
 
@@ -126,9 +124,7 @@ def convert_csv_to_yaml(csv_path: Path, yaml_path: Path) -> None:
 
 def main() -> None:
     """Run the conversion script."""
-    parser = argparse.ArgumentParser(
-        description="Convert CSV schedule file to YAML format"
-    )
+    parser = argparse.ArgumentParser(description="Convert CSV schedule file to YAML format")
     parser.add_argument(
         "csv_file",
         type=Path,
@@ -144,10 +140,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.output is None:
-        yaml_path = args.csv_file.with_suffix(".yaml")
-    else:
-        yaml_path = args.output
+    yaml_path = args.csv_file.with_suffix(".yaml") if args.output is None else args.output
 
     convert_csv_to_yaml(args.csv_file, yaml_path)
 

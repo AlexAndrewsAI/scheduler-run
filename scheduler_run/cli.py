@@ -29,8 +29,7 @@ def version_callback(value: bool) -> None:
 def main(
     files: list[Path] | None = typer.Argument(
         None,
-        help="Path(s) to YAML file(s) containing scheduled commands "
-        "(default: schedule.yaml)",
+        help="Path(s) to YAML file(s) containing scheduled commands (default: schedule.yaml)",
     ),
     allow_duplicates: bool = typer.Option(
         False,
@@ -51,8 +50,8 @@ def main(
         "--capture-output/--no-capture-output",
         help=(
             "Capture stdout/stderr from subprocesses and log them on failure "
-            "(default: enabled). Pass --no-capture-output to let subprocess "
-            "output flow directly to the terminal."
+            "(default: enabled). Pass --no-capture-output to discard subprocess "
+            "stdout/stderr."
         ),
     ),
     version: bool | None = typer.Option(

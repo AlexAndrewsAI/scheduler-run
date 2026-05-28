@@ -1,5 +1,6 @@
 """Tests for the config module."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -105,9 +106,7 @@ def test_schedule_entry_delay_negative() -> None:
 
 def test_schedule_entry_repetitions_valid() -> None:
     """Test ScheduleEntry with valid repetitions."""
-    entry = ScheduleEntry(
-        type="system", command="echo test", time="14:30", repetitions=3
-    )
+    entry = ScheduleEntry(type="system", command="echo test", time="14:30", repetitions=3)
     assert entry.repetitions == 3
 
     # Default repetitions should be 0
@@ -128,20 +127,14 @@ def test_schedule_entry_max_runtime_valid() -> None:
     assert entry_default.max_runtime is None
 
     # Explicit None should also be accepted
-    entry_none = ScheduleEntry(
-        type="system", command="echo test", time="14:30", max_runtime=None
-    )
+    entry_none = ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=None)
     assert entry_none.max_runtime is None
 
     # Positive integers should be accepted
-    entry_60 = ScheduleEntry(
-        type="system", command="echo test", time="14:30", max_runtime=60
-    )
+    entry_60 = ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=60)
     assert entry_60.max_runtime == 60
 
-    entry_1 = ScheduleEntry(
-        type="system", command="echo test", time="14:30", max_runtime=1
-    )
+    entry_1 = ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=1)
     assert entry_1.max_runtime == 1
 
 
@@ -154,9 +147,7 @@ def test_schedule_entry_max_runtime_invalid() -> None:
         ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=-1)
 
     with pytest.raises(ValueError, match="max_runtime must be a positive integer"):
-        ScheduleEntry(
-            type="system", command="echo test", time="14:30", max_runtime=-3600
-        )
+        ScheduleEntry(type="system", command="echo test", time="14:30", max_runtime=-3600)
 
 
 def test_schedule_entry_interval_valid() -> None:
@@ -174,9 +165,7 @@ def test_schedule_entry_interval_valid() -> None:
 def test_schedule_entry_interval_zero_with_repetitions() -> None:
     """Test ScheduleEntry with interval=0 and repetitions>0 raises error."""
     with pytest.raises(ValueError, match="Interval cannot be 0 when repetitions > 0"):
-        ScheduleEntry(
-            type="system", command="echo test", time="14:30", repetitions=3, interval=0
-        )
+        ScheduleEntry(type="system", command="echo test", time="14:30", repetitions=3, interval=0)
 
 
 def test_schedule_entry_interval_negative_with_repetitions() -> None:
@@ -185,19 +174,19 @@ def test_schedule_entry_interval_negative_with_repetitions() -> None:
         ValueError,
         match="Interval cannot be negative \\(except -1\\) when repetitions > 0",
     ):
-        ScheduleEntry(
-            type="system", command="echo test", time="14:30", repetitions=3, interval=-5
-        )
+        ScheduleEntry(type="system", command="echo test", time="14:30", repetitions=3, interval=-5)
 
 
 def test_schedule_entry_interval_positive_without_repetitions() -> None:
     """Test ScheduleEntry with positive interval and repetitions=0 raises error."""
     with pytest.raises(
-        ValueError, match=r"Interval .* is ignored when repetitions == 0"
+        ValueError,
+        match=(
+            r"Interval .* is ignored when repetitions == 0 "
+            r"and variables/variables_env is not set"
+        ),
     ):
-        ScheduleEntry(
-            type="system", command="echo test", time="14:30", repetitions=0, interval=60
-        )
+        ScheduleEntry(type="system", command="echo test", time="14:30", repetitions=0, interval=60)
 
 
 def test_schedule_entry_interval_valid_with_repetitions() -> None:
@@ -539,7 +528,7 @@ def test_schedule_entry_variables_invalid_value_type() -> None:
             type="system",
             command="echo test",
             time="14:30",
-            variables={"num": [1, 2, {"invalid": "dict"}]},  # type: ignore[dict-item]
+            variables={"num": [1, 2, {"invalid": "dict"}]},  # type: ignore[list-item]
         )
 
 
@@ -547,7 +536,8 @@ def test_schedule_entry_variables_validator_none() -> None:
     """Test validate_variables returns None when v is None (line 401)."""
     from scheduler_run.config import ScheduleEntry
 
-    # Use model_validate with context to bypass type checking and test the validator directly
+    # Use model_validate with context to bypass type checking
+    # and test the validator directly
     result = ScheduleEntry.validate_variables(None)
     assert result is None
 
@@ -569,30 +559,29 @@ def test_schedule_entry_variables_validator_key_not_string() -> None:
 
 
 def test_schedule_entry_variables_validator_values_not_list() -> None:
-    """Test validate_variables raises ValueError when values is not a list (line 412)."""
+    """Test validate_variables raises ValueError when values is not a list."""
     from scheduler_run.config import ScheduleEntry
 
-    with pytest.raises(
-        ValueError, match="Variable values for 'num' must be a list, got str"
-    ):
+    with pytest.raises(ValueError, match="Variable values for 'num' must be a list, got str"):
         ScheduleEntry.validate_variables({"num": "not a list"})  # type: ignore[dict-item]
 
 
 def test_schedule_entry_variables_validator_value_invalid_type() -> None:
-    """Test validate_variables raises ValueError when value is not str/int/float (line 419)."""
+    """Test validate_variables raises ValueError when value is not str/int/float."""
     from scheduler_run.config import ScheduleEntry
 
     with pytest.raises(
         ValueError,
         match="Variable value for 'num' must be str, int, or float, got dict",
     ):
-        ScheduleEntry.validate_variables({"num": [1, 2, {"invalid": "dict"}]})  # type: ignore[dict-item]
+        ScheduleEntry.validate_variables({"num": [1, 2, {"invalid": "dict"}]})  # type: ignore[list-item]
 
 
 def test_schedule_entry_variables_and_repetitions_conflict() -> None:
     """Test ScheduleEntry rejects both variables and repetitions set."""
     with pytest.raises(
-        ValueError, match="Cannot use both 'variables' and 'repetitions'"
+        ValueError,
+        match="Cannot use both 'variables'/'variables_env' and 'repetitions'",
     ):
         ScheduleEntry(
             type="system",
@@ -605,7 +594,9 @@ def test_schedule_entry_variables_and_repetitions_conflict() -> None:
 
 def test_schedule_entry_interval_zero_with_variables() -> None:
     """Test ScheduleEntry with interval=0 and variables raises error."""
-    with pytest.raises(ValueError, match="Interval cannot be 0 when variables is set"):
+    with pytest.raises(
+        ValueError, match="Interval cannot be 0 when variables or variables_env is set"
+    ):
         ScheduleEntry(
             type="system",
             command="echo {num}",
@@ -619,7 +610,9 @@ def test_schedule_entry_interval_negative_with_variables() -> None:
     """Test ScheduleEntry rejects negative interval when variables is set."""
     with pytest.raises(
         ValueError,
-        match="Interval cannot be negative \\(except -1\\) when variables is set",
+        match=(
+            "Interval cannot be negative \\(except -1\\) when variables or variables_env is set"
+        ),
     ):
         ScheduleEntry(
             type="system",
@@ -653,3 +646,362 @@ def test_schedule_entry_interval_valid_with_variables() -> None:
     )
     assert entry2.interval == 60
     assert entry2.variables == {"num": [1, 2, 3]}
+
+
+def test_schedule_entry_variables_env_valid_ints() -> None:
+    """Test ScheduleEntry with valid variables_env containing JSON array of ints."""
+    os.environ["NUM_VAR"] = "[1, 2, 3]"
+    try:
+        entry = ScheduleEntry(
+            type="system",
+            command="echo {num}",
+            time="14:30",
+            variables_env={"num": "NUM_VAR"},
+        )
+        assert entry.variables_env == {"num": "NUM_VAR"}
+    finally:
+        del os.environ["NUM_VAR"]
+
+
+def test_schedule_entry_variables_env_valid_strings() -> None:
+    """Test ScheduleEntry with valid variables_env containing JSON array of strings."""
+    os.environ["NAME_VAR"] = '["alice", "bob", "charlie"]'
+    try:
+        entry = ScheduleEntry(
+            type="system",
+            command="echo {name}",
+            time="14:30",
+            variables_env={"name": "NAME_VAR"},
+        )
+        assert entry.variables_env == {"name": "NAME_VAR"}
+    finally:
+        del os.environ["NAME_VAR"]
+
+
+def test_schedule_entry_variables_env_valid_floats() -> None:
+    """Test ScheduleEntry with valid variables_env containing JSON array of floats."""
+    os.environ["VALUE_VAR"] = "[1.5, 2.5, 3.5]"
+    try:
+        entry = ScheduleEntry(
+            type="system",
+            command="echo {value}",
+            time="14:30",
+            variables_env={"value": "VALUE_VAR"},
+        )
+        assert entry.variables_env == {"value": "VALUE_VAR"}
+    finally:
+        del os.environ["VALUE_VAR"]
+
+
+def test_schedule_entry_variables_env_valid_mixed_types() -> None:
+    """Test ScheduleEntry with valid variables_env containing mixed types."""
+    os.environ["MIXED_VAR"] = '[1, "two", 3.5]'
+    try:
+        entry = ScheduleEntry(
+            type="system",
+            command="echo {value}",
+            time="14:30",
+            variables_env={"value": "MIXED_VAR"},
+        )
+        assert entry.variables_env == {"value": "MIXED_VAR"}
+    finally:
+        del os.environ["MIXED_VAR"]
+
+
+def test_schedule_entry_variables_env_missing_env_var() -> None:
+    """Test ScheduleEntry raises error when environment variable is missing."""
+    # Ensure the env var is not set
+    if "MISSING_VAR" in os.environ:
+        del os.environ["MISSING_VAR"]
+
+    with pytest.raises(
+        ValueError,
+        match="Environment variable 'MISSING_VAR' for variable 'num' is not set",
+    ):
+        ScheduleEntry(
+            type="system",
+            command="echo {num}",
+            time="14:30",
+            variables_env={"num": "MISSING_VAR"},
+        )
+
+
+def test_schedule_entry_variables_env_invalid_json() -> None:
+    """Test ScheduleEntry raises error when env var has invalid JSON."""
+    os.environ["INVALID_JSON_VAR"] = "not valid json"
+    try:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Environment variable 'INVALID_JSON_VAR' for variable 'num' contains invalid JSON"
+            ),
+        ):
+            ScheduleEntry(
+                type="system",
+                command="echo {num}",
+                time="14:30",
+                variables_env={"num": "INVALID_JSON_VAR"},
+            )
+    finally:
+        del os.environ["INVALID_JSON_VAR"]
+
+
+def test_schedule_entry_variables_env_not_a_list() -> None:
+    """Test ScheduleEntry raises error when parsed value is not a list."""
+    os.environ["NOT_LIST_VAR"] = '{"key": "value"}'
+    try:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Environment variable 'NOT_LIST_VAR' for variable 'num' must contain a JSON array"
+            ),
+        ):
+            ScheduleEntry(
+                type="system",
+                command="echo {num}",
+                time="14:30",
+                variables_env={"num": "NOT_LIST_VAR"},
+            )
+    finally:
+        del os.environ["NOT_LIST_VAR"]
+
+
+def test_schedule_entry_variables_env_empty_list() -> None:
+    """Test ScheduleEntry raises error when parsed list is empty."""
+    os.environ["EMPTY_LIST_VAR"] = "[]"
+    try:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Environment variable 'EMPTY_LIST_VAR' "
+                "for variable 'num' cannot contain an empty array"
+            ),
+        ):
+            ScheduleEntry(
+                type="system",
+                command="echo {num}",
+                time="14:30",
+                variables_env={"num": "EMPTY_LIST_VAR"},
+            )
+    finally:
+        del os.environ["EMPTY_LIST_VAR"]
+
+
+def test_schedule_entry_variables_env_invalid_value_type() -> None:
+    """Test ScheduleEntry raises error when parsed list has invalid types."""
+    os.environ["INVALID_TYPE_VAR"] = '[1, 2, {"invalid": "dict"}]'
+    try:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Environment variable 'INVALID_TYPE_VAR' "
+                "for variable 'num' must contain only str, int, or float values"
+            ),
+        ):
+            ScheduleEntry(
+                type="system",
+                command="echo {num}",
+                time="14:30",
+                variables_env={"num": "INVALID_TYPE_VAR"},
+            )
+    finally:
+        del os.environ["INVALID_TYPE_VAR"]
+
+
+def test_schedule_entry_variables_and_variables_env_overlapping_keys() -> None:
+    """Test ScheduleEntry raises error when variables and variables_env overlap."""
+    os.environ["NUM_VAR"] = "[1, 2, 3]"
+    try:
+        with pytest.raises(
+            ValueError,
+            match="variables and variables_env cannot have overlapping keys: num",
+        ):
+            ScheduleEntry(
+                type="system",
+                command="echo {num}",
+                time="14:30",
+                variables={"num": [4, 5, 6]},
+                variables_env={"num": "NUM_VAR"},
+            )
+    finally:
+        del os.environ["NUM_VAR"]
+
+
+def test_schedule_entry_variables_and_variables_env_different_keys() -> None:
+    """Test ScheduleEntry accepts both variables and variables_env."""
+    os.environ["LETTER_VAR"] = '["a", "b"]'
+    try:
+        entry = ScheduleEntry(
+            type="system",
+            command="echo {num}-{letter}",
+            time="14:30",
+            variables={"num": [1, 2]},
+            variables_env={"letter": "LETTER_VAR"},
+        )
+        assert entry.variables == {"num": [1, 2]}
+        assert entry.variables_env == {"letter": "LETTER_VAR"}
+    finally:
+        del os.environ["LETTER_VAR"]
+
+
+def test_schedule_entry_variables_env_default_none() -> None:
+    """Test ScheduleEntry variables_env defaults to None."""
+    entry = ScheduleEntry(type="system", command="echo test", time="14:30")
+    assert entry.variables_env is None
+
+
+def test_schedule_entry_variables_env_validator_none() -> None:
+    """Test validate_variables_env returns None when v is None (line 461)."""
+    from scheduler_run.config import ScheduleEntry
+
+    result = ScheduleEntry.validate_variables_env(None)
+    assert result is None
+
+
+def test_schedule_entry_variables_env_validator_not_dict() -> None:
+    """Test validate_variables_env raises ValueError when v is not a dict (line 464)."""
+    from scheduler_run.config import ScheduleEntry
+
+    with pytest.raises(ValueError, match="variables_env must be a dictionary"):
+        ScheduleEntry.validate_variables_env("not a dict")  # type: ignore[arg-type]
+
+
+def test_schedule_entry_variables_env_validator_key_not_string() -> None:
+    """Test validate_variables_env raises ValueError when key is not a string."""
+    from scheduler_run.config import ScheduleEntry
+
+    with pytest.raises(ValueError, match="Variable key must be a string, got int"):
+        ScheduleEntry.validate_variables_env({123: "NUM_VAR"})  # type: ignore[dict-item]
+
+
+def test_schedule_entry_variables_env_validator_value_not_string() -> None:
+    """Test validate_variables_env raises ValueError when env_var_name is not a string."""
+    from scheduler_run.config import ScheduleEntry
+
+    with pytest.raises(ValueError, match="Environment variable name for 'num' must be a string"):
+        ScheduleEntry.validate_variables_env({"num": 123})  # type: ignore[dict-item]
+
+
+def test_schedule_entry_variables_env_invalid_not_dict() -> None:
+    """Test ScheduleEntry rejects variables_env that is not a dict."""
+    with pytest.raises(ValidationError, match="Input should be a valid dictionary"):
+        ScheduleEntry(
+            type="system",
+            command="echo test",
+            time="14:30",
+            variables_env="not a dict",  # type: ignore[arg-type]
+        )
+
+
+def test_schedule_entry_variables_env_invalid_key_not_string() -> None:
+    """Test ScheduleEntry rejects variables_env with non-string keys."""
+    os.environ["NUM_VAR"] = "[1, 2, 3]"
+    try:
+        with pytest.raises(ValidationError, match="Input should be a valid string"):
+            ScheduleEntry(
+                type="system",
+                command="echo test",
+                time="14:30",
+                variables_env={123: "NUM_VAR"},  # type: ignore[dict-item]
+            )
+    finally:
+        del os.environ["NUM_VAR"]
+
+
+def test_schedule_entry_variables_env_invalid_value_not_string() -> None:
+    """Test ScheduleEntry rejects variables_env with non-string values."""
+    with pytest.raises(ValidationError, match="Input should be a valid string"):
+        ScheduleEntry(
+            type="system",
+            command="echo test",
+            time="14:30",
+            variables_env={"num": 123},  # type: ignore[dict-item]
+        )
+
+
+def test_schedule_entry_variables_env_interval_zero() -> None:
+    """Test ScheduleEntry with interval=0 and variables_env raises error."""
+    os.environ["NUM_VAR"] = "[1, 2, 3]"
+    try:
+        with pytest.raises(
+            ValueError,
+            match=("Interval cannot be 0 when variables or variables_env is set"),
+        ):
+            ScheduleEntry(
+                type="system",
+                command="echo {num}",
+                time="14:30",
+                variables_env={"num": "NUM_VAR"},
+                interval=0,
+            )
+    finally:
+        del os.environ["NUM_VAR"]
+
+
+def test_schedule_entry_variables_env_interval_negative() -> None:
+    """Test ScheduleEntry rejects negative interval when variables_env is set."""
+    os.environ["NUM_VAR"] = "[1, 2, 3]"
+    try:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Interval cannot be negative \\(except -1\\) when variables or variables_env is set"
+            ),
+        ):
+            ScheduleEntry(
+                type="system",
+                command="echo {num}",
+                time="14:30",
+                variables_env={"num": "NUM_VAR"},
+                interval=-5,
+            )
+    finally:
+        del os.environ["NUM_VAR"]
+
+
+def test_schedule_entry_variables_env_interval_valid() -> None:
+    """Test ScheduleEntry with valid interval and variables_env."""
+    os.environ["NUM_VAR"] = "[1, 2, 3]"
+    try:
+        # interval=-1 with variables_env (auto-calculation)
+        entry1 = ScheduleEntry(
+            type="system",
+            command="echo {num}",
+            time="14:30",
+            variables_env={"num": "NUM_VAR"},
+            interval=-1,
+        )
+        assert entry1.interval == -1
+        assert entry1.variables_env == {"num": "NUM_VAR"}
+
+        # interval>0 with variables_env
+        entry2 = ScheduleEntry(
+            type="system",
+            command="echo {num}",
+            time="14:30",
+            variables_env={"num": "NUM_VAR"},
+            interval=60,
+        )
+        assert entry2.interval == 60
+        assert entry2.variables_env == {"num": "NUM_VAR"}
+    finally:
+        del os.environ["NUM_VAR"]
+
+
+def test_schedule_entry_variables_env_and_repetitions_conflict() -> None:
+    """Test ScheduleEntry rejects both variables_env and repetitions."""
+    os.environ["NUM_VAR"] = "[1, 2, 3]"
+    try:
+        with pytest.raises(
+            ValueError,
+            match="Cannot use both 'variables'/'variables_env' and 'repetitions'",
+        ):
+            ScheduleEntry(
+                type="system",
+                command="echo test",
+                time="14:30",
+                variables_env={"num": "NUM_VAR"},
+                repetitions=2,
+            )
+    finally:
+        del os.environ["NUM_VAR"]
