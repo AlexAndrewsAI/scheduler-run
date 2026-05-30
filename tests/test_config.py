@@ -169,12 +169,13 @@ def test_schedule_entry_interval_zero_with_repetitions() -> None:
 
 
 def test_schedule_entry_interval_negative_with_repetitions() -> None:
-    """Test ScheduleEntry rejects negative interval when repetitions > 0."""
-    with pytest.raises(
-        ValueError,
-        match="Interval cannot be negative \\(except -1\\) when repetitions > 0",
-    ):
-        ScheduleEntry(type="system", command="echo test", time="14:30", repetitions=3, interval=-5)
+    """Test ScheduleEntry accepts negative interval when repetitions > 0 for spreading runs."""
+    # Negative interval values like -2 should be allowed to spread runs evenly n times per day
+    entry = ScheduleEntry(
+        type="system", command="echo test", time="14:30", repetitions=3, interval=-2
+    )
+    assert entry.interval == -2
+    assert entry.repetitions == 3
 
 
 def test_schedule_entry_interval_positive_without_repetitions() -> None:
@@ -607,20 +608,17 @@ def test_schedule_entry_interval_zero_with_variables() -> None:
 
 
 def test_schedule_entry_interval_negative_with_variables() -> None:
-    """Test ScheduleEntry rejects negative interval when variables is set."""
-    with pytest.raises(
-        ValueError,
-        match=(
-            "Interval cannot be negative \\(except -1\\) when variables or variables_env is set"
-        ),
-    ):
-        ScheduleEntry(
-            type="system",
-            command="echo {num}",
-            time="14:30",
-            variables={"num": [1, 2, 3]},
-            interval=-5,
-        )
+    """Test ScheduleEntry accepts negative interval when variables is set for spreading runs."""
+    # Negative interval values like -2 should be allowed to spread runs evenly n times per day
+    entry = ScheduleEntry(
+        type="system",
+        command="echo {num}",
+        time="14:30",
+        variables={"num": [1, 2, 3]},
+        interval=-2,
+    )
+    assert entry.interval == -2
+    assert entry.variables == {"num": [1, 2, 3]}
 
 
 def test_schedule_entry_interval_valid_with_variables() -> None:
@@ -939,22 +937,19 @@ def test_schedule_entry_variables_env_interval_zero() -> None:
 
 
 def test_schedule_entry_variables_env_interval_negative() -> None:
-    """Test ScheduleEntry rejects negative interval when variables_env is set."""
+    """Test ScheduleEntry accepts negative interval when variables_env is set for spreading runs."""
     os.environ["NUM_VAR"] = "[1, 2, 3]"
     try:
-        with pytest.raises(
-            ValueError,
-            match=(
-                "Interval cannot be negative \\(except -1\\) when variables or variables_env is set"
-            ),
-        ):
-            ScheduleEntry(
-                type="system",
-                command="echo {num}",
-                time="14:30",
-                variables_env={"num": "NUM_VAR"},
-                interval=-5,
-            )
+        # Negative interval values like -2 should be allowed to spread runs evenly n times per day
+        entry = ScheduleEntry(
+            type="system",
+            command="echo {num}",
+            time="14:30",
+            variables_env={"num": "NUM_VAR"},
+            interval=-2,
+        )
+        assert entry.interval == -2
+        assert entry.variables_env == {"num": "NUM_VAR"}
     finally:
         del os.environ["NUM_VAR"]
 

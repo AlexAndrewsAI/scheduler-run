@@ -104,6 +104,7 @@ def test_reap_finished_processes_success(caplog: pytest.LogCaptureFixture) -> No
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.poll.return_value = 0
     mock_process.args = ["echo", "test"]
+    mock_process.communicate.return_value = (b"", b"")
     scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
 
     scheduler._reap_finished_processes()
@@ -154,6 +155,76 @@ def test_reap_finished_processes_failure_no_capture(
     assert "stdout:" not in caplog.text
     assert "stderr:" not in caplog.text
     assert "Check the logs above for output details" not in caplog.text
+
+
+def test_reap_finished_processes_success_no_capture(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes logs success without captured output."""
+    config = Config(capture_output=False)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = 0
+    mock_process.args = ["true"]
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
+
+    scheduler._reap_finished_processes()
+
+    assert scheduler._running_processes == []
+    assert "Command completed: true (exit 0)" in caplog.text
+
+
+def test_reap_finished_processes_success_with_output(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes logs success with non-empty stdout/stderr."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = 0
+    mock_process.args = ["echo", "test"]
+    mock_process.communicate.return_value = (b"test output\n", b"warning message\n")
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
+
+    scheduler._reap_finished_processes()
+
+    assert scheduler._running_processes == []
+    assert "Command completed: echo test (exit 0)" in caplog.text
+    assert "stdout: test output" in caplog.text
+    assert "stderr: warning message" in caplog.text
+
+
+def test_reap_finished_processes_kills_when_max_runtime_exceeded_timeout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes handles TimeoutExpired after SIGKILL."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.WARNING)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = None
+    mock_process.args = ["sleep", "9999"]
+    mock_process.pid = 4242
+    mock_process.wait.side_effect = subprocess.TimeoutExpired("sleep", 5)
+    # start_time far in the past so elapsed >> max_runtime
+    rp = RunningProcess(mock_process, time.monotonic() - 120, max_runtime=60)
+    scheduler._running_processes = [rp]
+
+    with (
+        patch("scheduler_run.scheduler.os.getpgid", return_value=4242),
+        patch("scheduler_run.scheduler.os.killpg") as mock_killpg,
+    ):
+        scheduler._reap_finished_processes()
+
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
+        mock_process.wait.assert_called_once_with(timeout=5)
+        assert scheduler._running_processes == []
+        assert "max_runtime of 60s exceeded" in caplog.text
+        assert "sleep 9999" in caplog.text
+        assert "did not terminate within 5s after SIGKILL" in caplog.text
 
 
 def test_reap_finished_processes_keeps_running() -> None:
@@ -920,7 +991,7 @@ def test_schedule_command_auto_calculate_interval(
 
     # Verify auto-calculation was logged
     assert "Auto-calculated interval: 21600s" in caplog.text
-    assert "spread 4 executions evenly throughout the day" in caplog.text
+    assert "spread 4 executions evenly 1 times per day" in caplog.text
 
     # Verify the scheduled times are spaced 6 hours apart
     # 00:00, 06:00, 12:00, 18:00
@@ -1084,6 +1155,7 @@ def test_max_concurrent_processes_queue_on_finish(
     mock_process1 = MagicMock(spec=subprocess.Popen)
     mock_process1.poll.return_value = None
     mock_process1.args = ["sleep", "10"]
+    mock_process1.communicate.return_value = (b"", b"")
 
     mock_process2 = MagicMock(spec=subprocess.Popen)
     mock_process2.poll.return_value = None
@@ -1562,28 +1634,28 @@ def test_load_schedule_interval_zero_with_repetitions(
 def test_load_schedule_interval_negative_with_repetitions(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule rejects negative interval when repetitions > 0."""
-    yaml_file = tmp_path / "invalid_interval_negative.yaml"
+    """Test load_schedule accepts negative interval when repetitions > 0 for spreading runs."""
+    yaml_file = tmp_path / "valid_interval_negative.yaml"
     yaml_file.write_text(
         "schedules:\n"
         "  - type: system\n"
         "    command: echo 'test'\n"
         "    time: '14:30'\n"
         "    repetitions: 3\n"
-        "    interval: -5\n"
+        "    interval: -2\n"
     )
 
     config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
-    caplog.set_level(logging.ERROR)
+    caplog.set_level(logging.INFO)
 
-    with pytest.raises(ValidationError, match="Interval cannot be negative"):
-        scheduler.load_schedule()
+    # Should not raise ValidationError - negative interval is allowed for spreading runs
+    scheduler.load_schedule()
 
-    assert "Invalid entry" in caplog.text
-    # Verify no commands were scheduled due to atomicity
-    assert len(scheduler._job_registry.get_jobs()) == 0
-    assert len(scheduler.scheduled_commands) == 0
+    # Verify commands were scheduled successfully
+    # With repetitions=3, we get 4 total executions (1 original + 3 repetitions)
+    # spread evenly 2 times per day
+    assert len(scheduler.scheduled_commands) == 4
 
 
 def test_job_should_run_previous_day() -> None:
@@ -1794,9 +1866,9 @@ def test_schedule_command_with_variables(caplog: pytest.LogCaptureFixture) -> No
     assert len(scheduler._job_registry.get_jobs()) == 3
 
     # Verify each execution was logged
-    assert "(execution 1/3, vars:" in caplog.text
-    assert "(execution 2/3, vars:" in caplog.text
-    assert "(execution 3/3, vars:" in caplog.text
+    assert "(execution 1/3, run 1/1, vars:" in caplog.text
+    assert "(execution 2/3, run 1/1, vars:" in caplog.text
+    assert "(execution 3/3, run 1/1, vars:" in caplog.text
 
 
 def test_schedule_command_with_variables_auto_interval(
@@ -1806,7 +1878,7 @@ def test_schedule_command_with_variables_auto_interval(
     scheduler = Scheduler()
     caplog.set_level(logging.INFO)
 
-    # 3 values should auto-calculate interval to 24*3600/4 = 21600 seconds
+    # 3 values should auto-calculate interval to 24*3600/3 = 28800 seconds
     scheduler._schedule_command(
         "system",
         "echo {num}",
@@ -1819,8 +1891,8 @@ def test_schedule_command_with_variables_auto_interval(
     assert len(scheduler.scheduled_commands) == 3
 
     # Verify auto-calculation was logged
-    assert "Auto-calculated interval: 21600s" in caplog.text
-    assert "spread 4 executions evenly throughout the day" in caplog.text
+    assert "Auto-calculated interval: 28800s" in caplog.text
+    assert "spread 3 variable combinations evenly 1 times per day" in caplog.text
 
 
 def test_load_schedule_with_variables(tmp_path: Path) -> None:

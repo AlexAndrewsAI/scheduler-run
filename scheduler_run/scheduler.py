@@ -735,8 +735,7 @@ class Scheduler:
                 num_executions = 1 + repetitions
                 interval = (24 * 3600) // (times_per_day * num_executions)
                 logger.info(
-                    "Auto-calculated interval: %ss to spread %s executions "
-                    "evenly %s times per day",
+                    "Auto-calculated interval: %ss to spread %s executions evenly %s times per day",
                     interval,
                     num_executions,
                     times_per_day,
