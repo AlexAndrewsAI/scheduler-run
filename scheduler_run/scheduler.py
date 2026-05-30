@@ -333,7 +333,14 @@ class Scheduler:
                         elapsed,
                     )
                     self._kill_process_group(rp.process)
-                    rp.process.wait()
+                    try:
+                        rp.process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        logger.warning(
+                            "Process '%s' did not terminate within 5s after SIGKILL, "
+                            "continuing anyway",
+                            command,
+                        )
                     continue
 
             return_code = rp.process.poll()
