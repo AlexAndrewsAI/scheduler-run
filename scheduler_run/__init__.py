@@ -1,7 +1,7 @@
 """scheduler-run.
 
 A scheduler that runs commands from a YAML file at specified times using
-pydantic for configuration and the schedule library for task scheduling.
+pydantic for configuration and an in-process Job/JobRegistry for daily scheduling.
 """
 
 from scheduler_run.config import Config

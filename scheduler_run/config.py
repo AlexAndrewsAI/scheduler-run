@@ -3,6 +3,8 @@
 Provides configuration management using Pydantic models.
 """
 
+import json
+import os
 import re
 import shlex
 from collections.abc import Callable, Sequence
@@ -44,9 +46,9 @@ class Config(BaseModel):
         allow_duplicates: Whether to allow duplicate schedule entries.
             If False (default), duplicate entries are detected and skipped.
         max_concurrent: Maximum number of concurrent subprocesses to run.
-            If None (default), there is no limit. If set to a positive integer,
-            the scheduler will queue commands when the limit is reached and
-            start them as slots become available.
+            Defaults to 5. If set to a positive integer, the scheduler queues
+            commands when the limit is reached and starts them as slots become
+            available. If None, there is no limit (API only; CLI defaults to 5).
         capture_output: Whether to capture stdout/stderr from subprocesses.
             If True (default), output is captured and logged on failure.
             If False, output is discarded (subprocess.DEVNULL).
@@ -63,7 +65,10 @@ class Config(BaseModel):
     )
     max_concurrent: int | None = Field(
         default=5,
-        description="Maximum number of concurrent subprocesses to run",
+        description=(
+            "Maximum number of concurrent subprocesses to run (default: 5). "
+            "Use None for unlimited (Python API only)."
+        ),
     )
     capture_output: bool = Field(
         default=True,
@@ -161,10 +166,22 @@ class ScheduleEntry(BaseModel):
             where single-digit hours (H:MM) are allowed in addition to
             two-digit hours (HH:MM).
         delay: Optional delay in seconds, which triggers a random start delay.
-        repetitions: Number of times to repeat the command (0 means no repetition).
+        variables: Variable mappings for pattern expansion. If provided, the command
+            will be expanded for each combination of variable values using Cartesian
+            product. Variables are substituted using f-string style syntax (e.g., {num}).
+            Replaces the deprecated 'repetitions' field.
+        variables_env: Variable mappings from environment variables. Maps variable names
+            to environment variable names. The environment variable value should be a
+            JSON-formatted string containing a list of values (e.g., NUM_VAR="[1, 2, 3]").
+            If provided, the command will be expanded for each combination of variable
+            values using Cartesian product. Can be used together with 'variables' as
+            long as variable names do not overlap.
+        repetitions: [DEPRECATED] Number of times to repeat the command (0 means no repetition).
+            Use 'variables' instead for pattern-based expansion.
         interval: Time offset in seconds from the base time for each repetition
-            (only used when repetitions > 0). If set to -1 and repetitions > 0,
-            the interval is auto-calculated to spread runs evenly throughout the day.
+            (only used when repetitions > 0 or variables is set). If set to -1 and
+            repetitions > 0 or variables is set, the interval is auto-calculated to
+            spread runs evenly throughout the day.
 
     """
 
@@ -181,19 +198,41 @@ class ScheduleEntry(BaseModel):
         default=0,
         description="Optional delay in seconds, which triggers a random start delay",
     )
+    variables: dict[str, list[str | int | float]] | None = Field(
+        default=None,
+        description=(
+            "Variable mappings for pattern expansion. If provided, the command "
+            "will be expanded for each combination of variable values using Cartesian "
+            "product. Variables are substituted using f-string style syntax (e.g., {num})."
+        ),
+    )
+    variables_env: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Variable mappings from environment variables. Maps variable names to "
+            "environment variable names. The environment variable value should be a "
+            'JSON-formatted string containing a list of values (e.g., NUM_VAR="[1, 2, 3]"). '
+            "If provided, the command will be expanded for each combination of variable "
+            "values using Cartesian product. Can be used together with 'variables' as "
+            "long as variable names do not overlap."
+        ),
+    )
     repetitions: int = Field(
         default=0,
-        description="Number of times to repeat the command (0 means no repetition)",
+        description=(
+            "[DEPRECATED] Number of times to repeat the command (0 means no repetition). "
+            "Use 'variables' instead for pattern-based expansion."
+        ),
     )
     interval: int = Field(
         default=-1,
         description=(
             "Time offset in seconds from the base time for each repetition "
-            "(only used when repetitions > 0). The timing for repetition i is "
-            "calculated as base_time + (i * interval) + delay_i, where delay_i "
-            "is a random delay recalculated for each execution. If set to -1 and "
-            "repetitions > 0, the interval is auto-calculated to spread runs "
-            "evenly throughout the day: 24*3600 / (repetitions + 1)"
+            "(only used when repetitions > 0 or variables is set). The timing for "
+            "repetition i is calculated as base_time + (i * interval) + delay_i, where "
+            "delay_i is a random delay recalculated for each execution. If set to a negative "
+            "value -n and repetitions > 0 or variables is set, the interval is auto-calculated "
+            "to spread runs evenly n times per day (e.g., -2 spreads runs evenly 2 times per day)."
         ),
     )
     max_runtime: int | None = Field(
@@ -294,15 +333,12 @@ class ScheduleEntry(BaseModel):
         if not v.strip():
             raise ValueError("Type cannot be empty")
         registry: CommandRegistry = (
-            info.context.get("registry", COMMAND_RUNNERS)
-            if info.context
-            else COMMAND_RUNNERS
+            info.context.get("registry", COMMAND_RUNNERS) if info.context else COMMAND_RUNNERS
         )
         if v not in registry:
             supported_types_str = ", ".join(sorted(registry.keys()))
             raise ValueError(
-                f"Unsupported command type: '{v}'. "
-                f"Supported types: {supported_types_str}"
+                f"Unsupported command type: '{v}'. Supported types: {supported_types_str}"
             )
         return v
 
@@ -363,9 +399,122 @@ class ScheduleEntry(BaseModel):
             raise ValueError("Repetitions must be a non-negative integer")
         return v
 
+    @field_validator("variables")
+    @classmethod
+    def validate_variables(
+        cls, v: dict[str, list[str | int | float]] | None
+    ) -> dict[str, list[str | int | float]] | None:
+        """Validate that variables is properly structured.
+
+        Args:
+            v: The variables value to validate.
+
+        Returns:
+            The validated variables value.
+
+        Raises:
+            ValueError: If variables is invalid.
+
+        """
+        if v is None:
+            return v
+
+        if not isinstance(v, dict):
+            raise ValueError("Variables must be a dictionary")
+
+        for key, values in v.items():
+            if not isinstance(key, str):
+                raise ValueError(f"Variable key must be a string, got {type(key).__name__}")
+            if not isinstance(values, list):
+                raise ValueError(
+                    f"Variable values for '{key}' must be a list, got {type(values).__name__}"
+                )
+            if not values:
+                raise ValueError(f"Variable values for '{key}' cannot be empty")
+            for value in values:
+                if not isinstance(value, (str, int, float)):
+                    raise ValueError(
+                        f"Variable value for '{key}' must be str, int, or float, "
+                        f"got {type(value).__name__}"
+                    )
+
+        return v
+
+    @field_validator("variables_env")
+    @classmethod
+    def validate_variables_env(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        """Validate that variables_env is properly structured and resolves environment variables.
+
+        Args:
+            v: The variables_env value to validate.
+
+        Returns:
+            The validated variables_env value.
+
+        Raises:
+            ValueError: If variables_env is invalid or environment variables are missing/invalid.
+
+        """
+        if v is None:
+            return v
+
+        if not isinstance(v, dict):
+            raise ValueError("variables_env must be a dictionary")
+
+        for key, env_var_name in v.items():
+            if not isinstance(key, str):
+                raise ValueError(f"Variable key must be a string, got {type(key).__name__}")
+            if not isinstance(env_var_name, str):
+                raise ValueError(
+                    f"Environment variable name for '{key}' must be a string, "
+                    f"got {type(env_var_name).__name__}"
+                )
+
+            # Read the environment variable
+            if env_var_name not in os.environ:
+                raise ValueError(
+                    f"Environment variable '{env_var_name}' for variable '{key}' is not set"
+                )
+
+            env_value = os.environ[env_var_name]
+
+            # Parse JSON
+            try:
+                parsed_value = json.loads(env_value)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"Environment variable '{env_var_name}' for variable '{key}' "
+                    f"contains invalid JSON: {e}"
+                ) from e
+
+            # Validate that parsed value is a list
+            if not isinstance(parsed_value, list):
+                raise ValueError(
+                    f"Environment variable '{env_var_name}' for variable '{key}' "
+                    f"must contain a JSON array, got {type(parsed_value).__name__}"
+                )
+
+            # Validate that list is not empty
+            if not parsed_value:
+                raise ValueError(
+                    f"Environment variable '{env_var_name}' for variable '{key}' "
+                    f"cannot contain an empty array"
+                )
+
+            # Validate that all values are str, int, or float
+            for value in parsed_value:
+                if not isinstance(value, (str, int, float)):
+                    raise ValueError(
+                        f"Environment variable '{env_var_name}' for variable '{key}' "
+                        f"must contain only str, int, or float values, "
+                        f"got {type(value).__name__}"
+                    )
+
+        return v
+
     @model_validator(mode="after")
     def validate_interval_with_repetitions(self) -> "ScheduleEntry":
-        """Validate that interval is consistent with repetitions.
+        """Validate that interval is consistent with repetitions or variables.
 
         Args:
             self: The ScheduleEntry instance.
@@ -374,23 +523,55 @@ class ScheduleEntry(BaseModel):
             The validated ScheduleEntry instance.
 
         Raises:
-            ValueError: If interval is invalid for the given repetitions.
+            ValueError: If interval is invalid for the given repetitions or variables.
 
         """
-        if self.repetitions > 0:
+        has_variables = self.variables is not None or self.variables_env is not None
+        if has_variables:
+            if self.repetitions > 0:
+                raise ValueError(
+                    "Cannot use both 'variables'/'variables_env' and 'repetitions'. "
+                    "Use 'variables' or 'variables_env' for pattern-based expansion."
+                )
+            if self.interval == 0:
+                raise ValueError(
+                    "Interval cannot be 0 when variables or variables_env is set. "
+                    "Use a negative value for auto-calculation or a positive value."
+                )
+        elif self.repetitions > 0:
             if self.interval == 0:
                 raise ValueError(
                     "Interval cannot be 0 when repetitions > 0. "
-                    "Use -1 for auto-calculation or a positive value."
-                )
-            if self.interval < 0 and self.interval != -1:
-                raise ValueError(
-                    f"Interval cannot be negative (except -1) when repetitions > 0. "
-                    f"Got: {self.interval}"
+                    "Use a negative value for auto-calculation or a positive value."
                 )
         elif self.repetitions == 0 and self.interval > 0:
             raise ValueError(
-                f"Interval ({self.interval}) is ignored when repetitions == 0. "
-                "Set repetitions > 0 to use interval, or set interval to -1."
+                f"Interval ({self.interval}) is ignored when "
+                "repetitions == 0 and variables/variables_env is not set. "
+                "Set repetitions > 0 or variables/variables_env to use interval, "
+                "or set interval to -1."
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_no_overlapping_variables(self) -> "ScheduleEntry":
+        """Validate that variables and variables_env do not have overlapping keys.
+
+        Args:
+            self: The ScheduleEntry instance.
+
+        Returns:
+            The validated ScheduleEntry instance.
+
+        Raises:
+            ValueError: If variables and variables_env have overlapping keys.
+
+        """
+        if self.variables is not None and self.variables_env is not None:
+            overlapping_keys = set(self.variables.keys()) & set(self.variables_env.keys())
+            if overlapping_keys:
+                raise ValueError(
+                    f"variables and variables_env cannot have overlapping keys: "
+                    f"{', '.join(sorted(overlapping_keys))}"
+                )
         return self

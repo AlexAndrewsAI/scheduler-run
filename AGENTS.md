@@ -11,7 +11,7 @@
 | Environment & Dependencies | uv |
 | Data Validation | Pydantic |
 | CLI Framework | Typer |
-| Task Scheduling | schedule |
+| Task Scheduling | In-process Job / JobRegistry (`scheduler.py`) |
 | Testing | pytest |
 | Linting & Formatting | ruff |
 | Type Checking | mypy |
@@ -20,7 +20,7 @@
 ```
 scheduler_run/
   ├── config.py          (Pydantic models: Config, ScheduleEntry)
-  ├── scheduler.py       (Core scheduling logic)
+  ├── scheduler.py       (Job/JobRegistry, subprocess execution)
   └── cli.py             (Typer CLI)
 tests/                   (Pytest suite)
 scripts/                 (Utility scripts, e.g. CSV conversion)

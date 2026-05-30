@@ -2,10 +2,12 @@
 
 import datetime
 import logging
+import os
 import signal
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -13,7 +15,7 @@ import yaml
 from pydantic import ValidationError
 
 from scheduler_run.config import Config
-from scheduler_run.scheduler import RunningProcess, Scheduler
+from scheduler_run.scheduler import RunningProcess, Scheduler, _expand_variables
 
 
 def test_scheduler_init_default_config() -> None:
@@ -43,10 +45,7 @@ def test_scheduler_instance_registries_are_isolated() -> None:
     scheduler_b = Scheduler()
 
     # Each instance's runner points to its own bound method, not a shared reference
-    assert (
-        scheduler_a._command_runners["system"]
-        is not scheduler_b._command_runners["system"]
-    )
+    assert scheduler_a._command_runners["system"] is not scheduler_b._command_runners["system"]
     assert scheduler_a._command_runners["system"] == scheduler_a._run_system_command
     assert scheduler_b._command_runners["system"] == scheduler_b._run_system_command
 
@@ -105,9 +104,8 @@ def test_reap_finished_processes_success(caplog: pytest.LogCaptureFixture) -> No
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.poll.return_value = 0
     mock_process.args = ["echo", "test"]
-    scheduler._running_processes = [
-        RunningProcess(mock_process, time.monotonic(), None)
-    ]
+    mock_process.communicate.return_value = (b"", b"")
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
 
     scheduler._reap_finished_processes()
 
@@ -126,9 +124,7 @@ def test_reap_finished_processes_failure(
     mock_process.poll.return_value = 1
     mock_process.args = ["false"]
     mock_process.communicate.return_value = (b"stdout output", b"stderr output")
-    scheduler._running_processes = [
-        RunningProcess(mock_process, time.monotonic(), None)
-    ]
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
 
     scheduler._reap_finished_processes()
 
@@ -150,9 +146,7 @@ def test_reap_finished_processes_failure_no_capture(
     mock_process = MagicMock(spec=subprocess.Popen)
     mock_process.poll.return_value = 1
     mock_process.args = ["false"]
-    scheduler._running_processes = [
-        RunningProcess(mock_process, time.monotonic(), None)
-    ]
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
 
     scheduler._reap_finished_processes()
 
@@ -161,6 +155,76 @@ def test_reap_finished_processes_failure_no_capture(
     assert "stdout:" not in caplog.text
     assert "stderr:" not in caplog.text
     assert "Check the logs above for output details" not in caplog.text
+
+
+def test_reap_finished_processes_success_no_capture(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes logs success without captured output."""
+    config = Config(capture_output=False)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.INFO)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = 0
+    mock_process.args = ["true"]
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
+
+    scheduler._reap_finished_processes()
+
+    assert scheduler._running_processes == []
+    assert "Command completed: true (exit 0)" in caplog.text
+
+
+def test_reap_finished_processes_success_with_output(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes logs success with non-empty stdout/stderr."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = 0
+    mock_process.args = ["echo", "test"]
+    mock_process.communicate.return_value = (b"test output\n", b"warning message\n")
+    scheduler._running_processes = [RunningProcess(mock_process, time.monotonic(), None)]
+
+    scheduler._reap_finished_processes()
+
+    assert scheduler._running_processes == []
+    assert "Command completed: echo test (exit 0)" in caplog.text
+    assert "stdout: test output" in caplog.text
+    assert "stderr: warning message" in caplog.text
+
+
+def test_reap_finished_processes_kills_when_max_runtime_exceeded_timeout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _reap_finished_processes handles TimeoutExpired after SIGKILL."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.WARNING)
+
+    mock_process = MagicMock(spec=subprocess.Popen)
+    mock_process.poll.return_value = None
+    mock_process.args = ["sleep", "9999"]
+    mock_process.pid = 4242
+    mock_process.wait.side_effect = subprocess.TimeoutExpired("sleep", 5)
+    # start_time far in the past so elapsed >> max_runtime
+    rp = RunningProcess(mock_process, time.monotonic() - 120, max_runtime=60)
+    scheduler._running_processes = [rp]
+
+    with (
+        patch("scheduler_run.scheduler.os.getpgid", return_value=4242),
+        patch("scheduler_run.scheduler.os.killpg") as mock_killpg,
+    ):
+        scheduler._reap_finished_processes()
+
+        mock_killpg.assert_called_once_with(4242, signal.SIGKILL)
+        mock_process.wait.assert_called_once_with(timeout=5)
+        assert scheduler._running_processes == []
+        assert "max_runtime of 60s exceeded" in caplog.text
+        assert "sleep 9999" in caplog.text
+        assert "did not terminate within 5s after SIGKILL" in caplog.text
 
 
 def test_reap_finished_processes_keeps_running() -> None:
@@ -398,9 +462,7 @@ def test_schedule_command_unsupported_type() -> None:
         scheduler._schedule_command("unsupported", "echo 'test'", "14:30")
 
 
-def test_load_schedule_success(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_success(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with a valid YAML file."""
     yaml_file = tmp_path / "test_schedule.yaml"
     yaml_file.write_text(
@@ -479,9 +541,7 @@ def test_load_schedule_schedules_not_a_list(
     assert len(scheduler.scheduled_commands) == 0
 
 
-def test_load_schedule_permission_denied(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_permission_denied(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule when the YAML file cannot be read."""
     yaml_file = tmp_path / "protected.yaml"
     config = Config(yaml_path=yaml_file)
@@ -504,9 +564,7 @@ def test_load_schedule_permission_denied(
         assert len(scheduler.scheduled_commands) == 0
 
 
-def test_load_schedule_yaml_parse_error(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_yaml_parse_error(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule when YAML parsing fails."""
     yaml_file = tmp_path / "broken.yaml"
     yaml_file.write_text("schedules:\n  - type: [\n")
@@ -523,9 +581,7 @@ def test_load_schedule_yaml_parse_error(
     assert len(scheduler.scheduled_commands) == 0
 
 
-def test_load_schedule_file_not_found(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_file_not_found(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with a non-existent YAML file."""
     non_existent = tmp_path / "non_existent.yaml"
     config = Config(yaml_path=non_existent)  # type: ignore[arg-type]
@@ -538,9 +594,7 @@ def test_load_schedule_file_not_found(
     assert f"YAML file not found: {non_existent}" in caplog.text
 
 
-def test_load_schedule_invalid_entry(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_invalid_entry(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with invalid YAML entries raises ValidationError."""
     yaml_file = tmp_path / "invalid_schedule.yaml"
     yaml_file.write_text(
@@ -564,9 +618,7 @@ def test_load_schedule_invalid_entry(
     assert len(scheduler._job_registry.get_jobs()) == 0
 
 
-def test_load_schedule_duplicate_entries(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_duplicate_entries(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with duplicate entries (all fields identical)."""
     yaml_file = tmp_path / "duplicate_schedule.yaml"
     yaml_file.write_text(
@@ -630,9 +682,7 @@ def test_scheduler_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None
         mock_terminate.assert_called_once()
 
 
-def test_load_schedule_empty_list(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_empty_list(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with an empty schedules list."""
     yaml_file = tmp_path / "empty_schedule.yaml"
     yaml_file.write_text("schedules: []\n")
@@ -648,9 +698,7 @@ def test_load_schedule_empty_list(
     assert len(scheduler.scheduled_commands) == 0
 
 
-def test_load_schedule_missing_type_key(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_missing_type_key(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with entry missing 'type' key raises ValidationError."""
     yaml_file = tmp_path / "missing_type.yaml"
     yaml_file.write_text("schedules:\n  - command: echo 'test'\n    time: '14:30'\n")
@@ -682,9 +730,7 @@ def test_load_schedule_missing_command_key(
     assert "Invalid entry" in caplog.text
 
 
-def test_load_schedule_missing_time_key(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_missing_time_key(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with entry missing 'time' key raises ValidationError."""
     yaml_file = tmp_path / "missing_time.yaml"
     yaml_file.write_text("schedules:\n  - type: system\n    command: echo 'test'\n")
@@ -699,9 +745,7 @@ def test_load_schedule_missing_time_key(
     assert "Invalid entry" in caplog.text
 
 
-def test_load_schedule_unsupported_type(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_unsupported_type(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with unsupported type raises ValidationError."""
     yaml_file = tmp_path / "unsupported_type.yaml"
     yaml_file.write_text(
@@ -805,9 +849,7 @@ def test_calculate_next_run() -> None:
     assert scheduler._calculate_next_run("08:00", now=now) == "2026-05-23 08:00:00"
 
 
-def test_load_schedule_logging(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_logging(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test logging output in load_schedule with mock datetime."""
     yaml_file = tmp_path / "logging_schedule.yaml"
     yaml_file.write_text(
@@ -843,12 +885,8 @@ def test_load_schedule_logging(
         # Inspect the logs
         log_text = caplog.text
         assert "Scheduled commands:" in log_text
-        assert (
-            "system • echo 'hello world' • 2026-05-22 14:10:10 • delay: 10s" in log_text
-        )
-        assert (
-            "system • echo 'good morning' • 2026-05-23 08:00:00 • delay: 0s" in log_text
-        )
+        assert "system • echo 'hello world' • 2026-05-22 14:10:10 • delay: 10s" in log_text
+        assert "system • echo 'good morning' • 2026-05-23 08:00:00 • delay: 0s" in log_text
 
 
 def test_schedule_command_with_repetitions(caplog: pytest.LogCaptureFixture) -> None:
@@ -945,9 +983,7 @@ def test_schedule_command_auto_calculate_interval(
 
     # repetitions=3 should auto-calculate interval to
     # 24*3600/4 = 21600 seconds (6 hours)
-    scheduler._schedule_command(
-        "system", "echo 'test'", "00:00", repetitions=3, interval=-1
-    )
+    scheduler._schedule_command("system", "echo 'test'", "00:00", repetitions=3, interval=-1)
 
     # Should schedule 4 times (1 + 3 repetitions)
     assert len(scheduler.scheduled_commands) == 4
@@ -955,7 +991,7 @@ def test_schedule_command_auto_calculate_interval(
 
     # Verify auto-calculation was logged
     assert "Auto-calculated interval: 21600s" in caplog.text
-    assert "spread 4 executions evenly throughout the day" in caplog.text
+    assert "spread 4 executions evenly 1 times per day" in caplog.text
 
     # Verify the scheduled times are spaced 6 hours apart
     # 00:00, 06:00, 12:00, 18:00
@@ -1024,9 +1060,7 @@ def test_load_schedule_with_auto_calculated_interval(
     assert "Auto-calculated interval: 21600s" in caplog.text
 
 
-def test_load_schedule_multiple_files(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_multiple_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with multiple YAML files."""
     yaml_file1 = tmp_path / "schedule1.yaml"
     yaml_file1.write_text(
@@ -1121,6 +1155,7 @@ def test_max_concurrent_processes_queue_on_finish(
     mock_process1 = MagicMock(spec=subprocess.Popen)
     mock_process1.poll.return_value = None
     mock_process1.args = ["sleep", "10"]
+    mock_process1.communicate.return_value = (b"", b"")
 
     mock_process2 = MagicMock(spec=subprocess.Popen)
     mock_process2.poll.return_value = None
@@ -1252,9 +1287,7 @@ def test_process_pending_queue_with_limit(caplog: pytest.LogCaptureFixture) -> N
     mock_process1 = MagicMock(spec=subprocess.Popen)
     mock_process1.poll.return_value = None
     mock_process1.args = ["sleep", "10"]
-    scheduler._running_processes = [
-        RunningProcess(mock_process1, time.monotonic(), None)
-    ]
+    scheduler._running_processes = [RunningProcess(mock_process1, time.monotonic(), None)]
 
     # Add 3 commands to queue
     scheduler._pending_queue.append(("system", "echo 'test1'", None))
@@ -1290,9 +1323,7 @@ def test_scheduler_init_with_max_concurrent() -> None:
     assert scheduler.config.max_concurrent == 5
 
 
-def test_load_schedule_allow_duplicates(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_allow_duplicates(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with allow_duplicates=True."""
     yaml_file = tmp_path / "duplicate_schedule.yaml"
     yaml_file.write_text(
@@ -1501,14 +1532,11 @@ def test_load_schedule_multiple_files_second_missing(
     assert len(scheduler.scheduled_commands) == 0
 
 
-def test_load_schedule_non_dict_list_item(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_schedule_non_dict_list_item(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test load_schedule with non-dict YAML list items (e.g., - 'oops')."""
     yaml_file = tmp_path / "invalid_list.yaml"
     yaml_file.write_text(
-        "schedules:\n  - 'oops'\n  - type: system\n    "
-        "command: echo 'test'\n    time: '14:30'\n"
+        "schedules:\n  - 'oops'\n  - type: system\n    command: echo 'test'\n    time: '14:30'\n"
     )
 
     config = Config(yaml_path=yaml_file)
@@ -1606,28 +1634,28 @@ def test_load_schedule_interval_zero_with_repetitions(
 def test_load_schedule_interval_negative_with_repetitions(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Test load_schedule rejects negative interval when repetitions > 0."""
-    yaml_file = tmp_path / "invalid_interval_negative.yaml"
+    """Test load_schedule accepts negative interval when repetitions > 0 for spreading runs."""
+    yaml_file = tmp_path / "valid_interval_negative.yaml"
     yaml_file.write_text(
         "schedules:\n"
         "  - type: system\n"
         "    command: echo 'test'\n"
         "    time: '14:30'\n"
         "    repetitions: 3\n"
-        "    interval: -5\n"
+        "    interval: -2\n"
     )
 
     config = Config(yaml_path=yaml_file)
     scheduler = Scheduler(config)
-    caplog.set_level(logging.ERROR)
+    caplog.set_level(logging.INFO)
 
-    with pytest.raises(ValidationError, match="Interval cannot be negative"):
-        scheduler.load_schedule()
+    # Should not raise ValidationError - negative interval is allowed for spreading runs
+    scheduler.load_schedule()
 
-    assert "Invalid entry" in caplog.text
-    # Verify no commands were scheduled due to atomicity
-    assert len(scheduler._job_registry.get_jobs()) == 0
-    assert len(scheduler.scheduled_commands) == 0
+    # Verify commands were scheduled successfully
+    # With repetitions=3, we get 4 total executions (1 original + 3 repetitions)
+    # spread evenly 2 times per day
+    assert len(scheduler.scheduled_commands) == 4
 
 
 def test_job_should_run_previous_day() -> None:
@@ -1727,3 +1755,405 @@ def test_job_registry_run_pending_exception_handling(
     # Verify error was logged
     assert "Job execution failed" in caplog.text
     assert "Test error" in caplog.text
+
+
+def test_expand_variables_single_variable() -> None:
+    """Test _expand_variables with a single variable."""
+    command = "echo {num}"
+    variables: dict[str, list[str | int | float]] = {"num": [1, 2, 3]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 3
+    assert result[0] == ("echo 1", {"num": 1})
+    assert result[1] == ("echo 2", {"num": 2})
+    assert result[2] == ("echo 3", {"num": 3})
+
+
+def test_expand_variables_multiple_variables() -> None:
+    """Test _expand_variables with multiple variables (Cartesian product)."""
+    command = "echo {num}-{letter}"
+    variables: dict[str, list[str | int | float]] = {"num": [1, 2], "letter": ["a", "b"]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 4
+    # Cartesian product order depends on sorted variable names
+    # Since we sort used_vars, 'letter' comes before 'num'
+    # So the order is: (a,1), (a,2), (b,1), (b,2)
+    expected_results = [
+        ("echo 1-a", {"letter": "a", "num": 1}),
+        ("echo 2-a", {"letter": "a", "num": 2}),
+        ("echo 1-b", {"letter": "b", "num": 1}),
+        ("echo 2-b", {"letter": "b", "num": 2}),
+    ]
+    assert result == expected_results
+
+
+def test_expand_variables_string_values() -> None:
+    """Test _expand_variables with string variable values."""
+    command = "echo {name}"
+    variables: dict[str, list[str | int | float]] = {"name": ["alice", "bob"]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 2
+    assert result[0] == ("echo alice", {"name": "alice"})
+    assert result[1] == ("echo bob", {"name": "bob"})
+
+
+def test_expand_variables_float_values() -> None:
+    """Test _expand_variables with float variable values."""
+    command = "echo {value}"
+    variables: dict[str, list[str | int | float]] = {"value": [1.5, 2.5]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 2
+    assert result[0] == ("echo 1.5", {"value": 1.5})
+    assert result[1] == ("echo 2.5", {"value": 2.5})
+
+
+def test_expand_variables_mixed_types() -> None:
+    """Test _expand_variables with mixed type variable values."""
+    command = "echo {value}"
+    variables: dict[str, list[str | int | float]] = {"value": [1, "two", 3.5]}
+
+    result = _expand_variables(command, variables)
+
+    assert len(result) == 3
+    assert result[0] == ("echo 1", {"value": 1})
+    assert result[1] == ("echo two", {"value": "two"})
+    assert result[2] == ("echo 3.5", {"value": 3.5})
+
+
+def test_expand_variables_undefined_variable() -> None:
+    """Test _expand_variables raises error for undefined variable in command."""
+    command = "echo {undefined}"
+    variables: dict[str, list[str | int | float]] = {"num": [1, 2, 3]}
+
+    with pytest.raises(ValueError, match="Undefined variables in command"):
+        _expand_variables(command, variables)
+
+
+def test_expand_variables_no_variables_in_command() -> None:
+    """Test _expand_variables when command has no variable placeholders."""
+    command = "echo hello"
+    variables: dict[str, list[str | int | float]] = {"num": [1, 2, 3]}
+
+    result = _expand_variables(command, variables)
+
+    # Should return one result with the original command and first variable value
+    assert len(result) == 1
+    assert result[0] == ("echo hello", {"num": 1})
+
+
+def test_schedule_command_with_variables(caplog: pytest.LogCaptureFixture) -> None:
+    """Test _schedule_command with variables."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    scheduler._schedule_command(
+        "system",
+        "echo {num}",
+        "14:30",
+        variables={"num": [1, 2, 3]},
+        interval=60,
+    )
+
+    # Should schedule 3 times (one for each variable value)
+    assert len(scheduler.scheduled_commands) == 3
+    assert len(scheduler._job_registry.get_jobs()) == 3
+
+    # Verify each execution was logged
+    assert "(execution 1/3, run 1/1, vars:" in caplog.text
+    assert "(execution 2/3, run 1/1, vars:" in caplog.text
+    assert "(execution 3/3, run 1/1, vars:" in caplog.text
+
+
+def test_schedule_command_with_variables_auto_interval(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _schedule_command with variables and auto-calculated interval."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    # 3 values should auto-calculate interval to 24*3600/3 = 28800 seconds
+    scheduler._schedule_command(
+        "system",
+        "echo {num}",
+        "00:00",
+        variables={"num": [1, 2, 3]},
+        interval=-1,
+    )
+
+    # Should schedule 3 times
+    assert len(scheduler.scheduled_commands) == 3
+
+    # Verify auto-calculation was logged
+    assert "Auto-calculated interval: 28800s" in caplog.text
+    assert "spread 3 variable combinations evenly 1 times per day" in caplog.text
+
+
+def test_load_schedule_with_variables(tmp_path: Path) -> None:
+    """Test load_schedule with an entry that includes variables."""
+    yaml_file = tmp_path / "variables_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: 'echo Number: {num}'\n"
+        "    time: '14:10'\n"
+        "    variables:\n"
+        "      num: [1, 2, 3]\n"
+        "    interval: 60\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+
+    scheduler.load_schedule()
+
+    # Should schedule 3 times (one for each variable value)
+    assert len(scheduler.scheduled_commands) == 3
+    assert len(scheduler._job_registry.get_jobs()) == 3
+
+    # Verify commands were expanded
+    commands = [cmd.command for cmd in scheduler.scheduled_commands]
+    assert "echo Number: 1" in commands
+    assert "echo Number: 2" in commands
+    assert "echo Number: 3" in commands
+
+
+def test_load_schedule_with_variables_multiple(tmp_path: Path) -> None:
+    """Test load_schedule with multiple variables (Cartesian product)."""
+    yaml_file = tmp_path / "variables_multiple_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo {num}-{letter}\n"
+        "    time: '14:10'\n"
+        "    variables:\n"
+        "      num: [1, 2]\n"
+        "      letter: [a, b]\n"
+        "    interval: 60\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+
+    scheduler.load_schedule()
+
+    # Should schedule 4 times (Cartesian product: 2 * 2)
+    assert len(scheduler.scheduled_commands) == 4
+    assert len(scheduler._job_registry.get_jobs()) == 4
+
+    # Verify commands were expanded
+    commands = [cmd.command for cmd in scheduler.scheduled_commands]
+    assert "echo 1-a" in commands
+    assert "echo 1-b" in commands
+    assert "echo 2-a" in commands
+    assert "echo 2-b" in commands
+
+
+def test_load_schedule_variables_and_repetitions_conflict(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule rejects both variables and repetitions."""
+    yaml_file = tmp_path / "conflict_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo 'test'\n"
+        "    time: '14:30'\n"
+        "    variables:\n"
+        "      num: [1, 2, 3]\n"
+        "    repetitions: 2\n"
+    )
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with pytest.raises(ValidationError, match="Cannot use both"):
+        scheduler.load_schedule()
+
+    assert "Invalid entry" in caplog.text
+    # Verify no commands were scheduled due to atomicity
+    assert len(scheduler._job_registry.get_jobs()) == 0
+    assert len(scheduler.scheduled_commands) == 0
+
+
+def test_expand_variables_key_error() -> None:
+    """Test _expand_variables raises ValueError on KeyError (lines 75-76)."""
+
+    # Create a custom string subclass that raises KeyError on format
+    class ErrorString(str):
+        def format(self, *_args: Any, **_kwargs: Any) -> str:
+            raise KeyError("test")
+
+    with pytest.raises(ValueError, match="Failed to substitute variables"):
+        _expand_variables(ErrorString("echo {num}"), {"num": [1, 2, 3]})
+
+
+def test_expand_variables_value_error() -> None:
+    """Test _expand_variables raises ValueError on ValueError (lines 75-76)."""
+
+    # Create a custom string subclass that raises ValueError on format
+    class ErrorString(str):
+        def format(self, *_args: Any, **_kwargs: Any) -> str:
+            raise ValueError("test")
+
+    with pytest.raises(ValueError, match="Failed to substitute variables"):
+        _expand_variables(ErrorString("echo {num}"), {"num": [1, 2, 3]})
+
+
+def test_schedule_command_with_variables_env_invalid_json_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _schedule_command handles invalid JSON in env var gracefully."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.WARNING)
+
+    # Set an environment variable with invalid JSON
+    os.environ["INVALID_JSON_VAR"] = "not valid json"
+    try:
+        # Call _schedule_command directly with variables_env
+        # This bypasses Pydantic validation to test the fallback error handling
+        scheduler._schedule_command(
+            "system",
+            "echo {num}",
+            "14:30",
+            variables_env={"num": "INVALID_JSON_VAR"},
+        )
+
+        # Should log a warning about the parsing failure
+        assert "Failed to parse environment variable 'INVALID_JSON_VAR'" in caplog.text
+        # Should still schedule the command (without variable expansion)
+        assert len(scheduler.scheduled_commands) == 1
+    finally:
+        del os.environ["INVALID_JSON_VAR"]
+
+
+def test_schedule_command_with_variables_and_delay(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test _schedule_command with variables and delay > 0 (line 642)."""
+    scheduler = Scheduler()
+    caplog.set_level(logging.INFO)
+
+    with patch("scheduler_run.scheduler.random.gauss") as mock_gauss:
+        mock_gauss.return_value = 12.3
+
+        scheduler._schedule_command(
+            "system",
+            "echo {num}",
+            "14:30",
+            delay=10,
+            variables={"num": [1, 2, 3]},
+            interval=60,
+        )
+
+
+def test_load_schedule_with_variables_env(tmp_path: Path) -> None:
+    """Test load_schedule with variables_env from environment variables."""
+    yaml_file = tmp_path / "variables_env_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo {num}\n"
+        "    time: '14:10'\n"
+        "    variables_env:\n"
+        "      num: NUM_VAR\n"
+        "    interval: 60\n"
+    )
+
+    # Set the environment variable
+    os.environ["NUM_VAR"] = "[1, 2, 3]"
+    try:
+        config = Config(yaml_path=yaml_file)
+        scheduler = Scheduler(config)
+
+        scheduler.load_schedule()
+
+        # Should schedule 3 times (one for each value in NUM_VAR)
+        assert len(scheduler.scheduled_commands) == 3
+        assert len(scheduler._job_registry.get_jobs()) == 3
+
+        # Verify commands were expanded
+        commands = [cmd.command for cmd in scheduler.scheduled_commands]
+        assert "echo 1" in commands
+        assert "echo 2" in commands
+        assert "echo 3" in commands
+    finally:
+        del os.environ["NUM_VAR"]
+
+
+def test_load_schedule_with_variables_and_variables_env(tmp_path: Path) -> None:
+    """Test load_schedule with both variables and variables_env (different keys)."""
+    yaml_file = tmp_path / "mixed_variables_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo {num}-{letter}\n"
+        "    time: '14:10'\n"
+        "    variables:\n"
+        "      num: [1, 2]\n"
+        "    variables_env:\n"
+        "      letter: LETTER_VAR\n"
+        "    interval: 60\n"
+    )
+
+    # Set the environment variable
+    os.environ["LETTER_VAR"] = '["a", "b"]'
+    try:
+        config = Config(yaml_path=yaml_file)
+        scheduler = Scheduler(config)
+
+        scheduler.load_schedule()
+
+        # Should schedule 4 times (Cartesian product: 2 * 2)
+        assert len(scheduler.scheduled_commands) == 4
+        assert len(scheduler._job_registry.get_jobs()) == 4
+
+        # Verify commands were expanded
+        commands = [cmd.command for cmd in scheduler.scheduled_commands]
+        assert "echo 1-a" in commands
+        assert "echo 1-b" in commands
+        assert "echo 2-a" in commands
+        assert "echo 2-b" in commands
+    finally:
+        del os.environ["LETTER_VAR"]
+
+
+def test_load_schedule_with_variables_env_missing_env_var(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test load_schedule raises error when environment variable is missing."""
+    yaml_file = tmp_path / "missing_env_var_schedule.yaml"
+    yaml_file.write_text(
+        "schedules:\n"
+        "  - type: system\n"
+        "    command: echo {num}\n"
+        "    time: '14:10'\n"
+        "    variables_env:\n"
+        "      num: MISSING_VAR\n"
+    )
+
+    # Ensure the env var is not set
+    if "MISSING_VAR" in os.environ:
+        del os.environ["MISSING_VAR"]
+
+    config = Config(yaml_path=yaml_file)
+    scheduler = Scheduler(config)
+    caplog.set_level(logging.ERROR)
+
+    with pytest.raises(
+        ValidationError,
+        match="Environment variable 'MISSING_VAR' for variable 'num' is not set",
+    ):
+        scheduler.load_schedule()
+
+    assert "Invalid entry" in caplog.text
+    # Verify no commands were scheduled due to atomicity
+    assert len(scheduler._job_registry.get_jobs()) == 0
+    assert len(scheduler.scheduled_commands) == 0
