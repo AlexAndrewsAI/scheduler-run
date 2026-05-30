@@ -8,14 +8,10 @@ repetitions, interval to a YAML file with the equivalent structure.
 import argparse
 import csv
 import logging
-import sys
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
-
-# Add parent directory to path to import scheduler_run module
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scheduler_run.config import ScheduleEntry
 

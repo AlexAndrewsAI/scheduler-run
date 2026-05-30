@@ -46,9 +46,9 @@ class Config(BaseModel):
         allow_duplicates: Whether to allow duplicate schedule entries.
             If False (default), duplicate entries are detected and skipped.
         max_concurrent: Maximum number of concurrent subprocesses to run.
-            If None (default), there is no limit. If set to a positive integer,
-            the scheduler will queue commands when the limit is reached and
-            start them as slots become available.
+            Defaults to 5. If set to a positive integer, the scheduler queues
+            commands when the limit is reached and starts them as slots become
+            available. If None, there is no limit (API only; CLI defaults to 5).
         capture_output: Whether to capture stdout/stderr from subprocesses.
             If True (default), output is captured and logged on failure.
             If False, output is discarded (subprocess.DEVNULL).
@@ -65,7 +65,10 @@ class Config(BaseModel):
     )
     max_concurrent: int | None = Field(
         default=5,
-        description="Maximum number of concurrent subprocesses to run",
+        description=(
+            "Maximum number of concurrent subprocesses to run (default: 5). "
+            "Use None for unlimited (Python API only)."
+        ),
     )
     capture_output: bool = Field(
         default=True,
@@ -227,9 +230,9 @@ class ScheduleEntry(BaseModel):
             "Time offset in seconds from the base time for each repetition "
             "(only used when repetitions > 0 or variables is set). The timing for "
             "repetition i is calculated as base_time + (i * interval) + delay_i, where "
-            "delay_i is a random delay recalculated for each execution. If set to -1 and "
-            "repetitions > 0 or variables is set, the interval is auto-calculated to "
-            "spread runs evenly throughout the day."
+            "delay_i is a random delay recalculated for each execution. If set to a negative "
+            "value -n and repetitions > 0 or variables is set, the interval is auto-calculated "
+            "to spread runs evenly n times per day (e.g., -2 spreads runs evenly 2 times per day)."
         ),
     )
     max_runtime: int | None = Field(
@@ -533,24 +536,13 @@ class ScheduleEntry(BaseModel):
             if self.interval == 0:
                 raise ValueError(
                     "Interval cannot be 0 when variables or variables_env is set. "
-                    "Use -1 for auto-calculation or a positive value."
-                )
-            if self.interval < 0 and self.interval != -1:
-                raise ValueError(
-                    "Interval cannot be negative (except -1) "
-                    "when variables or variables_env is set. "
-                    f"Got: {self.interval}"
+                    "Use a negative value for auto-calculation or a positive value."
                 )
         elif self.repetitions > 0:
             if self.interval == 0:
                 raise ValueError(
                     "Interval cannot be 0 when repetitions > 0. "
-                    "Use -1 for auto-calculation or a positive value."
-                )
-            if self.interval < 0 and self.interval != -1:
-                raise ValueError(
-                    f"Interval cannot be negative (except -1) when repetitions > 0. "
-                    f"Got: {self.interval}"
+                    "Use a negative value for auto-calculation or a positive value."
                 )
         elif self.repetitions == 0 and self.interval > 0:
             raise ValueError(

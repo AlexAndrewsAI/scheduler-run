@@ -1,17 +1,29 @@
+# Runs at 8am
 schedules:
 - type: system
   command: echo 'good morning'
   time: '08:00'
+# Runs with random delay average 30s
 - type: system
   command: echo 'with delay'
   time: '23:00'
   delay: 30
+# runs with 1 repitition (2x) separated by 3600s
 - type: system
   command: echo 'with repetition'
   time: '10:00'
   repetitions: 1
   interval: 3600
+# kills run after 300s
 - type: system
   command: echo 'with max runtime'
   time: '12:00'
   max_runtime: 300
+# Runs through each of 1,2,3,4 running 2x spread evenly through the day (8 total executions, every 3h)
+- type: system
+  command: 'echo "with variable {num}"'
+  time: '12:00'
+  variables:
+    num: [1,2,3,4]
+  interval: -2
+

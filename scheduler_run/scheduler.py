@@ -341,20 +341,24 @@ class Scheduler:
                 still_running.append(rp)
                 continue
             command = self._process_command(rp.process)
-            if return_code == 0:
-                logger.info("Command completed: %s (exit %s)", command, return_code)
-            else:
-                logger.error("Command failed: %s (exit %s)", command, return_code)
-                # Log captured output if available.
-                # NOTE: communicate() must be called at most once per process.
-                # This is safe here because _reap_finished_processes is the
-                # sole consumer of each RunningProcess — nothing else reads
-                # stdout/stderr — so the pipe buffers are still intact at
-                # this point. If that invariant ever changes, buffer the
-                # output at process-completion time instead of calling
-                # communicate() here.
-                if self.config.capture_output:
-                    stdout, stderr = rp.process.communicate()
+            # Log captured output if available.
+            # NOTE: communicate() must be called at most once per process.
+            # This is safe here because _reap_finished_processes is the
+            # sole consumer of each RunningProcess — nothing else reads
+            # stdout/stderr — so the pipe buffers are still intact at
+            # this point. If that invariant ever changes, buffer the
+            # output at process-completion time instead of calling
+            # communicate() here.
+            if self.config.capture_output:
+                stdout, stderr = rp.process.communicate()
+                if return_code == 0:
+                    logger.info("Command completed: %s (exit %s)", command, return_code)
+                    if stdout:
+                        logger.info("stdout: %s", stdout.decode(errors="replace").strip())
+                    if stderr:
+                        logger.info("stderr: %s", stderr.decode(errors="replace").strip())
+                else:
+                    logger.error("Command failed: %s (exit %s)", command, return_code)
                     if stdout:
                         logger.error("stdout: %s", stdout.decode(errors="replace").strip())
                     if stderr:
@@ -365,6 +369,11 @@ class Scheduler:
                         command,
                         return_code,
                     )
+            else:
+                if return_code == 0:
+                    logger.info("Command completed: %s (exit %s)", command, return_code)
+                else:
+                    logger.error("Command failed: %s (exit %s)", command, return_code)
         self._running_processes = still_running
         self._process_pending_queue()
 
@@ -635,76 +644,95 @@ class Scheduler:
             expanded_commands = _expand_variables(command, merged_variables)
             num_executions = len(expanded_commands)
 
-            # Auto-calculate interval if -1
-            if interval == -1:
-                interval = (24 * 3600) // (num_executions + 1)
+            # Auto-calculate interval if negative
+            if interval < 0:
+                times_per_day = abs(interval)
+                # Each variable combination runs times_per_day times per day
+                # Total executions = num_executions * times_per_day
+                # Interval = 24 hours / total_executions
+                total_executions = num_executions * times_per_day
+                interval = (24 * 3600) // total_executions
                 logger.info(
-                    "Auto-calculated interval: %ss to spread %s executions "
-                    "evenly throughout the day",
+                    "Auto-calculated interval: %ss to spread %s variable combinations "
+                    "evenly %s times per day (%s total executions)",
                     interval,
-                    num_executions + 1,
+                    num_executions,
+                    times_per_day,
+                    total_executions,
                 )
+            else:
+                # Positive interval: run each combination once with specified interval
+                times_per_day = 1
 
-            for i, (expanded_command, var_mapping) in enumerate(expanded_commands):
-                # Recalculate delay for each execution
-                if delay > 0:
-                    actual_delay = max(
-                        0,
-                        int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
+            # Schedule each variable combination times_per_day times
+            for run_num in range(times_per_day):
+                for i, (expanded_command, var_mapping) in enumerate(expanded_commands):
+                    # Recalculate delay for each execution
+                    if delay > 0:
+                        actual_delay = max(
+                            0,
+                            int(random.gauss(mu=delay, sigma=DELAY_SIGMA_MULTIPLIER * delay)),
+                        )
+                    else:
+                        actual_delay = 0
+
+                    # Calculate the base time for this execution
+                    # Global execution index across all runs
+                    global_index = run_num * num_executions + i
+                    if global_index == 0:
+                        base_time_str = time_str
+                    else:
+                        # Add interval to the base time
+                        parts = time_str.split(":")
+                        hours = int(parts[0])
+                        minutes = int(parts[1])
+                        total_seconds = hours * 3600 + minutes * 60 + (global_index * interval)
+                        total_seconds = total_seconds % (24 * 3600)
+                        h = total_seconds // 3600
+                        m = (total_seconds % 3600) // 60
+                        base_time_str = f"{h:02d}:{m:02d}"
+
+                    # Calculate actual time with delay
+                    actual_time = self._calculate_actual_time(base_time_str, actual_delay)
+
+                    self._job_registry.schedule_daily(
+                        runner, actual_time, expanded_command, max_runtime=max_runtime
                     )
-                else:
-                    actual_delay = 0
-
-                # Calculate the base time for this execution
-                if i == 0:
-                    base_time_str = time_str
-                else:
-                    # Add interval to the previous execution time
-                    parts = time_str.split(":")
-                    hours = int(parts[0])
-                    minutes = int(parts[1])
-                    total_seconds = hours * 3600 + minutes * 60 + (i * interval)
-                    total_seconds = total_seconds % (24 * 3600)
-                    h = total_seconds // 3600
-                    m = (total_seconds % 3600) // 60
-                    base_time_str = f"{h:02d}:{m:02d}"
-
-                # Calculate actual time with delay
-                actual_time = self._calculate_actual_time(base_time_str, actual_delay)
-
-                self._job_registry.schedule_daily(
-                    runner, actual_time, expanded_command, max_runtime=max_runtime
-                )
-                self.scheduled_commands.append(
-                    ScheduledCommand(
+                    self.scheduled_commands.append(
+                        ScheduledCommand(
+                            command_type,
+                            expanded_command,
+                            actual_time,
+                            actual_delay,
+                            max_runtime,
+                        )
+                    )
+                    logger.info(
+                        "Scheduled %s command '%s' (execution %s/%s, run %s/%s, vars: %s) at %s "
+                        "with calculated delay %ss",
                         command_type,
                         expanded_command,
+                        i + 1,
+                        num_executions,
+                        run_num + 1,
+                        times_per_day,
+                        var_mapping,
                         actual_time,
                         actual_delay,
-                        max_runtime,
                     )
-                )
-                logger.info(
-                    "Scheduled %s command '%s' (execution %s/%s, vars: %s) at %s "
-                    "with calculated delay %ss",
-                    command_type,
-                    expanded_command,
-                    i + 1,
-                    num_executions,
-                    var_mapping,
-                    actual_time,
-                    actual_delay,
-                )
         else:
             # Use existing repetitions logic for backward compatibility
-            # Auto-calculate interval if -1 and repetitions > 0
-            if interval == -1 and repetitions > 0:
-                interval = (24 * 3600) // (repetitions + 1)
+            # Auto-calculate interval if negative and repetitions > 0
+            if interval < 0 and repetitions > 0:
+                times_per_day = abs(interval)
+                num_executions = 1 + repetitions
+                interval = (24 * 3600) // (times_per_day * num_executions)
                 logger.info(
                     "Auto-calculated interval: %ss to spread %s executions "
-                    "evenly throughout the day",
+                    "evenly %s times per day",
                     interval,
-                    repetitions + 1,
+                    num_executions,
+                    times_per_day,
                 )
 
             # Calculate the number of executions (1 + repetitions)

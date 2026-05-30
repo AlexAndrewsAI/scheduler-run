@@ -41,8 +41,8 @@ def main(
         "--max-concurrent",
         help=(
             "Maximum number of concurrent subprocesses to run (default: 5). "
-            "Must be a positive integer or None (unlimited). "
-            "Zero and negative values are rejected."
+            "Must be a positive integer. Zero and negative values are rejected. "
+            "For unlimited concurrency, use the Python API with max_concurrent=None."
         ),
     ),
     capture_output: bool = typer.Option(
@@ -83,7 +83,8 @@ def main(
             If not provided, defaults to schedule.yaml in the current directory.
         allow_duplicates: When True, duplicate schedule entries are scheduled twice.
         max_concurrent: Maximum number of concurrent subprocesses to run.
-            Defaults to 5. Set to None for unlimited.
+            Defaults to 5. Unlimited concurrency is only available via the
+            Python API (Config(max_concurrent=None)).
         capture_output: When True, stdout/stderr from subprocesses is captured
             and logged on failure. When False, output flows directly to the
             terminal.
